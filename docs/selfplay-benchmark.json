@@ -1,0 +1,189 @@
+{
+  "checkpoint_sha256": "54bffe342ffb2c618ab6d62aac4f54adde3854df75aaccb4c0a1aec9b7e61a13",
+  "torch": "2.11.0+cu128",
+  "device": "cuda",
+  "gpu": "CUDA-capable GPU (exact model omitted)",
+  "simulations_per_unresolved_root": 64,
+  "tactical_ms_per_root": 2,
+  "scope": "Decision generation only; tactical mix is selected/correlated, not representative self-play.",
+  "results": {
+    "quiet_openings": {
+      "previous": {
+        "median_seconds": 0.252947,
+        "median_network_positions": 520,
+        "runs": [
+          {
+            "seconds": 0.2382248998619616,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2573794999625534,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2526399998459965,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.25294700008817017,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2551404000259936,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          }
+        ]
+      },
+      "tactical": {
+        "median_seconds": 0.262199,
+        "median_network_positions": 520,
+        "runs": [
+          {
+            "seconds": 0.24853039998561144,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.24528839997947216,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.27183610014617443,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.26792479981668293,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2621989999897778,
+            "network_positions": 520,
+            "sources": {
+              "mcts": 8
+            }
+          }
+        ]
+      }
+    },
+    "selected_tactical_mix": {
+      "previous": {
+        "median_seconds": 0.269222,
+        "median_network_positions": 490,
+        "runs": [
+          {
+            "seconds": 0.26981929992325604,
+            "network_positions": 490,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2619713998865336,
+            "network_positions": 490,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.26922230003401637,
+            "network_positions": 490,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.25652220007032156,
+            "network_positions": 490,
+            "sources": {
+              "mcts": 8
+            }
+          },
+          {
+            "seconds": 0.2746309000067413,
+            "network_positions": 490,
+            "sources": {
+              "mcts": 8
+            }
+          }
+        ]
+      },
+      "tactical": {
+        "median_seconds": 0.204845,
+        "median_network_positions": 195,
+        "runs": [
+          {
+            "seconds": 0.24011350004002452,
+            "network_positions": 130,
+            "sources": {
+              "proof_win": 3,
+              "proof_loss": 3,
+              "mcts": 2
+            }
+          },
+          {
+            "seconds": 0.2070700000040233,
+            "network_positions": 195,
+            "sources": {
+              "mcts": 3,
+              "proof_win": 2,
+              "proof_loss": 3
+            }
+          },
+          {
+            "seconds": 0.16987000009976327,
+            "network_positions": 130,
+            "sources": {
+              "proof_win": 3,
+              "proof_loss": 3,
+              "mcts": 2
+            }
+          },
+          {
+            "seconds": 0.19751870003528893,
+            "network_positions": 195,
+            "sources": {
+              "mcts": 3,
+              "proof_win": 2,
+              "proof_loss": 3
+            }
+          },
+          {
+            "seconds": 0.20484529994428158,
+            "network_positions": 195,
+            "sources": {
+              "proof_win": 2,
+              "mcts": 3,
+              "proof_loss": 3
+            }
+          }
+        ]
+      }
+    }
+  }
+}

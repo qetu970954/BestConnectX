@@ -1,0 +1,17 @@
+[project]
+name = "bestconnect6"
+version = "0.1.0"
+description = "Original single-GPU Connect6 self-play research engine"
+requires-python = ">=3.12"
+dependencies = ["numpy>=2,<3", "torch>=2.7,<3"]
+
+[dependency-groups]
+browser = ["playwright>=1.50,<2"]
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

@@ -1,0 +1,64 @@
+{
+  "scope": "Selected, correlated regression positions from one generated game; not a tournament.",
+  "discovery_seed": 65070,
+  "discovery_positions_checked": 32,
+  "candidate_cap": 256,
+  "width": 24,
+  "deadline_ms": 50,
+  "results": [
+    {
+      "placements_before": 27,
+      "baseline": [
+        256,
+        237
+      ],
+      "baseline_has_one_turn_certificate": false,
+      "certificates_found": 20,
+      "attempts": 20,
+      "certificate": [
+        256,
+        236
+      ],
+      "all_returned_certificates_valid": true,
+      "defender_pairs_checked_by_tests": 54946,
+      "median_ms": 1.267,
+      "max_ms": 1.872
+    },
+    {
+      "placements_before": 33,
+      "baseline": [
+        102,
+        104
+      ],
+      "baseline_has_one_turn_certificate": false,
+      "certificates_found": 20,
+      "attempts": 20,
+      "certificate": [
+        104,
+        107
+      ],
+      "all_returned_certificates_valid": true,
+      "defender_pairs_checked_by_tests": 52975,
+      "median_ms": 1.089,
+      "max_ms": 1.813
+    },
+    {
+      "placements_before": 43,
+      "baseline": [
+        236,
+        276
+      ],
+      "baseline_has_one_turn_certificate": false,
+      "certificates_found": 20,
+      "attempts": 20,
+      "certificate": [
+        236,
+        145
+      ],
+      "all_returned_certificates_valid": true,
+      "defender_pairs_checked_by_tests": 49770,
+      "median_ms": 0.669,
+      "max_ms": 1.165
+    }
+  ]
+}
