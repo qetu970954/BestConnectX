@@ -1,6 +1,6 @@
 # Configurable square-board training validation
 
-2026-10-02. Native project Python environment; **CPU only**, with `CUDA_VISIBLE_DEVICES=''`. All new training/checkpoint/gate data used disposable directories. No GPU experiment, persistent trained Gomoku checkpoint, or external-strength result was produced.
+2026-10-03. Native project Python environment; **CPU only**, with `CUDA_VISIBLE_DEVICES=''`. All new training/checkpoint/gate data used disposable directories. No GPU experiment, persistent trained Gomoku checkpoint, or external-strength result was produced.
 
 ## Regression checks
 
@@ -8,7 +8,7 @@
 uv run python -m unittest discover -s tests -v
 ```
 
-**47 CPU tests passed in 53.748 seconds**, including the 80/20 scheduler and faster batched self-play. This includes the existing Connect6 core/tactics/TSS tests and the revised connection-game checks.
+**49 CPU tests passed in 54.277 seconds**, including the 80/20 scheduler, faster batched self-play, and gate-timing regression checks. This includes the existing Connect6 core/tactics/TSS tests and the revised connection-game checks.
 
 The new checks exercise:
 
@@ -23,6 +23,8 @@ The new checks exercise:
 - An injected export failure: the durable checkpoint retains all pending game records/targets, and the next run completes exports without losing or duplicating games.
 - A paused/resumed **100-game gate**: legal paired openings, swapped engine colors, real terminal histories, unchanged frozen weights, tie retention, strict above-50 promotion, timing-overrun rejection, previous-best preservation and idempotent manifest publication.
 - A controlled-clock scheduler check: training publishes later snapshots while an earlier evaluation remains incomplete, stays within the 20% allowance apart from one cooperative operation, and retains time counters on resume. Smaller concurrency takes effect without dropping unfinished games.
+- A two-stone turn that takes 0.31 + 0.06 seconds against a 0.25-second budget records the full 0.12-second overrun, including when the gate reloads between stones. The next turn receives a fresh budget; search never receives negative time.
+- Simulated model loading of 1.1 seconds per frozen model no longer starves two-second gate slices: each model loads once per gate/session, subsequent slices make moves, and setup time still consumes the 20% evaluation allowance. Reuse still rejects altered candidate or opponent files by checksum.
 - Gates use a frozen simulation cap; 64 unresolved roots actually arrive together at network inference.
 - Explicit gate restart archives old report bytes and preserves both immutable models; changed model bytes are rejected before restart. An additional upgrade check used a disposable copy of the older 2,000-game checkpoint, retaining all 7,744 optimizer updates and 19,657 replay positions. Real run files were unchanged.
 

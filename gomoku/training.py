@@ -53,14 +53,20 @@ def snapshot(net, step, rules=DEFAULT_RULES, games=0):
     return {**model_state(net, step), "rules": rules.id, "rule_config": rules.to_dict(), "games": games}
 
 
-def network(root, entry, device, rules):
+def network(root, entry, device, rules, *, cache=None):
     path = artifact(root, entry["file"])
-    if entry.get("sha256") and digest(path) != entry["sha256"]:
+    sha = digest(path) if entry.get("sha256") or cache is not None else None
+    if entry.get("sha256") and sha != entry["sha256"]:
         raise ValueError("A frozen model's checksum changed; refusing to use it.")
+    key = (path, sha, str(device), rules)
+    if cache is not None and key in cache:
+        return cache[key]
     state = load_state(path, rules)
     net = Network(**state["config"]).to(device)
     net.load_state_dict(state["weights"])
     net.eval()
+    if cache is not None:
+        cache[key] = net
     return net
 
 
@@ -251,7 +257,7 @@ def restart_gate(root, name, rules, settings, code_sha, cap):
     return report
 
 
-def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_: None):
+def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_: None, *, model_cache=None):
     path = artifact(root, name)
     report = load_json(path)
     if report["rules"] != rules.id:
@@ -260,8 +266,8 @@ def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_
         return report
     if report["code_sha256"] != _source()[1]:
         raise ValueError("Search code changed during a gate. Restore the saved source or use train --restart-gate to archive and restart it.")
-    candidate = network(root, report["candidate"], device, rules)
-    opponent = network(root, report["opponent"], device, rules)
+    candidate = network(root, report["candidate"], device, rules, cache=model_cache)
+    opponent = network(root, report["opponent"], device, rules, cache=model_cache)
     started = time.monotonic()
     elapsed_before = report.get("elapsed_seconds", 0.0)
     while len(report["matches"]) < GATE_GAMES and not stopped() and time.monotonic() < deadline:
@@ -276,11 +282,12 @@ def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_
         engine = candidate if color == candidate_color else opponent
         plan, proof, strategy = list(current["plan"]), [current["proof"]], [current["strategies"][slot]]
         remaining = current["turn_remaining"]
+        budget = max(0., remaining) / game.left
         begin = time.monotonic()
         # Yield between placements, not by giving one engine a shortened thinking budget.
-        if deadline - begin < remaining / game.left:
+        if deadline - begin < budget:
             break
-        action = turn_action(game, engine, remaining / game.left,
+        action = turn_action(game, engine, budget,
                              report.get("simulations", 100_000), stopped, tactics=True, tss=True, plan=plan,
                              proof_plan=proof, strategy=strategy)
         if stopped():
@@ -291,8 +298,9 @@ def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_
             plan.pop(0)
         current.update(moves=game.moves, plan=plan, proof=proof[0] if plan else None)
         current["strategies"][slot] = strategy[0]
+        # Keep negative time between stones so overtime accumulates across slices/resumes.
         current["turn_remaining"] = (report["seconds_per_turn"] if game.player != color
-                                     else max(0, remaining - duration))
+                                     else remaining - duration)
         report["max_turn_overrun_seconds"] = max(report["max_turn_overrun_seconds"], duration - remaining)
         report["current"] = current
         if game.done:
@@ -389,6 +397,7 @@ def _train(args, root, rules):
     deadline = start + args.hours * 3600
     stopped = lambda: interrupted[0] or stop_file.exists() or time.monotonic() >= deadline
     last_save = last_status = start
+    gate_models = {}  # Only the current gate's two frozen networks; never checkpointed.
 
     def checkpoint():
         state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
@@ -448,12 +457,14 @@ def _train(args, root, rules):
                 gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
             if gate and credit >= max(1., load_json(root / gate)["seconds_per_turn"] + .05):
                 phase = "evaluation"
-                # ponytail: short serial gate slices; batch evaluation only if loading dominates measured cost.
+                # ponytail: serial gate slices; batch evaluation only if search throughput requires it.
                 until = min(deadline, began + min(credit, max(2., settings["gate_seconds"] + .05)))
                 gate_stopped = lambda: stopped() or time.monotonic() >= until
-                result = run_gate(root, gate, rules, device, until, gate_stopped, cap, status)
+                result = run_gate(root, gate, rules, device, until, gate_stopped, cap, status,
+                                  model_cache=gate_models)
                 if result.get("decision_recorded"):
                     gate = None
+                    gate_models.clear()
             elif since_update >= 8 or (games >= last_milestone + settings["snapshot_every"] and since_update):
                 # Preserve learning work when a larger batch finishes more than eight games at once.
                 pending = settings.get("pending_updates", settings["updates_per_cycle"] * max(1, (since_update + 7) // 8))

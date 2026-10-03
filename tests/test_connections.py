@@ -282,12 +282,24 @@ class GomokuTests(unittest.TestCase):
             def interrupt():
                 calls[0] += 1
                 return calls[0] > 11
-            partial = training.run_gate(root, filename, rules, device, time.monotonic() + 30, interrupt, 20 * GIB)
+            cache = {}
+            partial = training.run_gate(root, filename, rules, device, time.monotonic() + 30, interrupt,
+                                        20 * GIB, model_cache=cache)
             self.assertFalse(partial['complete'])
             self.assertTrue(partial['matches'] or partial['current'])
             frozen = [(root / entry['file']).read_bytes() for entry in entries]
+            cached_models = list(cache.values())
+            self.assertEqual(len(cached_models), 2)
+            for entry, original in zip(entries, frozen):
+                path = root / entry['file']
+                path.write_bytes(b'changed after caching')
+                with self.assertRaisesRegex(ValueError, 'checksum'):
+                    training.run_gate(root, filename, rules, device, time.monotonic() + 30,
+                                      lambda: False, 20 * GIB, model_cache=cache)
+                path.write_bytes(original)
             result = training.run_gate(root, filename, rules, device, time.monotonic() + 30,
-                                       lambda: False, 20 * GIB)
+                                       lambda: False, 20 * GIB, model_cache=cache)
+            self.assertEqual(list(cache.values()), cached_models)
             self.assertTrue(result['decision_recorded'])
             self.assertEqual((result['games'], result['required_games'], result['score']), (100, 100, .5))
             self.assertFalse(result['promoted'])
@@ -326,6 +338,79 @@ class GomokuTests(unittest.TestCase):
             self.assertEqual(best['previous']['file'], opponent['file'])
             self.assertEqual([(root / entry['file']).read_bytes() for entry in entries], frozen)
             training._finish_gate(root, root / filename, better, rules, 20 * GIB)  # Crash-safe publication retry.
+
+    def test_two_stone_gate_preserves_overtime_across_resume(self):
+        with tempfile.TemporaryDirectory() as name:
+            root, rules = Path(name), Rules(5, 5, 5, 2, 1)
+            report = training._gate_report(rules, {'games': 16}, {},
+                {'gate_seconds': .25, 'simulations': 2}, training._source()[1])
+            save_json(root / 'gate.json', report)
+            clock, budgets = [0.], []
+            durations = iter((.31, .06, .125))
+            def action(game, net, seconds, *a, **kw):
+                self.assertGreaterEqual(seconds, 0.)
+                budgets.append(seconds)
+                clock[0] += next(durations)
+                return int(game.actions()[0])
+            with patch.object(training, 'network', return_value=None), \
+                    patch.object(training, 'turn_action', side_effect=action), \
+                    patch.object(training.time, 'monotonic', lambda: clock[0]):
+                first = training.run_gate(root, 'gate.json', rules, 'cpu', .31, lambda: False, 20 * GIB)
+                self.assertAlmostEqual(first['max_turn_overrun_seconds'], .06)
+                # Reload the persisted report between stones, just like a slice or process restart.
+                second = training.run_gate(root, 'gate.json', rules, 'cpu', .37, lambda: False, 20 * GIB)
+                self.assertAlmostEqual(second['max_turn_overrun_seconds'], .12)
+                self.assertEqual(second['current']['turn_remaining'], .25)
+                third = training.run_gate(root, 'gate.json', rules, 'cpu', .495, lambda: False, 20 * GIB)
+                self.assertAlmostEqual(third['max_turn_overrun_seconds'], .12)
+            self.assertEqual(budgets, [.125, 0., .125])
+
+    def test_slow_gate_loading_does_not_starve_scheduled_evaluation(self):
+        device_for('cpu')
+        with tempfile.TemporaryDirectory() as name:
+            root, rules = Path(name), Rules(4, 4, 4)
+            net = Network(channels=4, blocks=1, size=4)
+            settings = dict(seed=5070, parallel=2, batch=2, simulations=2, bootstrap_games=16,
+                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=.25)
+            for games in (8, 16):
+                save_checkpoint(root / f'models/model-{games:08d}.pt', training.snapshot(net, 0, rules, games),
+                                20 * GIB, root=root)
+            opponent = {'file': 'models/model-00000008.pt', 'games': 8, 'kind': 'network', 'rules': rules.id,
+                        'sha256': training.digest(root / 'models/model-00000008.pt')}
+            save_json(root / 'incumbent.json', opponent)
+            gate = training.next_gate(root, rules, settings, training._source()[1], 20 * GIB)
+            state = training.snapshot(net, 0, rules, 16)
+            state.update(settings=settings, optimizer=torch.optim.AdamW(net.parameters()).state_dict(),
+                since_update=0, replay=[], active=[], last_milestone=16, gate=gate,
+                pending_games=[], pending_metrics=[], loss_metrics=None,
+                phase_seconds={'training': 80., 'evaluation': 0.},
+                rng=np.random.default_rng(5070).bit_generator.state, torch_rng=torch.get_rng_state())
+            save_checkpoint(root / 'latest.pt', state, 20 * GIB, root=root)
+            args = SimpleNamespace(data=name, rules=rules, disk_gib=20, device='cpu', parallel=None,
+                                   seconds=None, hours=.02, max_games=16, restart_gate=False)
+            clock, loads = [0.], []
+            original = training.load_state
+            def slow_load(path, rules=None):
+                if path.parent.name == 'models':
+                    loads.append(path.name)
+                    clock[0] += 1.1  # Two loads exceed the entire two-second evaluation slice.
+                return original(path, rules)
+            def action(game, *a, **kw):
+                clock[0] += .05
+                return int(game.actions()[0])
+            with patch.object(training, 'load_state', side_effect=slow_load), \
+                    patch.object(training, 'turn_action', side_effect=action) as moves, \
+                    patch.object(training.time, 'monotonic', lambda: clock[0]), \
+                    patch.object(training, 'train_step', side_effect=AssertionError('No training expected')), \
+                    patch.object(training, 'selfplay_batch', side_effect=AssertionError('No self-play expected')):
+                training.train(args)
+            self.assertGreater(moves.call_count, 0)
+            self.assertCountEqual(loads, ['model-00000008.pt', 'model-00000016.pt'])
+            saved = training.load_state(root / 'latest.pt')
+            self.assertEqual((saved['games'], saved['step']), (16, 0))
+            # Setup still consumes evaluation credit; caching must not hide it from the 80/20 budget.
+            self.assertAlmostEqual(saved['phase_seconds']['evaluation'], 2.2 + .05 * moves.call_count)
+            self.assertLessEqual(saved['phase_seconds']['evaluation'], 20.)
 
     def test_evaluation_quota_keeps_training_and_survives_resume(self):
         self.assertEqual(training.eval_allowance({'training': 80., 'evaluation': 20.}), 0.)

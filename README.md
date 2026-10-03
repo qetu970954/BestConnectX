@@ -49,6 +49,7 @@ The browser has **no training controls**. Pause CLI work before bot play. It sup
 - Save immutable models every **1,000 completed self-play games**. The first is an initial comparison baseline, not a validated strength claim.
 - Later snapshots challenge the current best over **100 games / 50 color-swapped legal opening pairs**. New gates cap each engine at **0.25 seconds per complete turn** and the saved self-play simulation count per placement (default 64), rather than searching up to 100,000 simulations. This compares short-search play, not five-second strength.
 - Snapshots produced while a gate is pending stay queued on disk. Each queued gate freezes the then-current best when it starts.
+- Gate slices reuse their two frozen networks while still rechecking file checksums; model loading counts toward evaluation time. Whole-turn overtime survives pauses between stones.
 - Replace the incumbent only above **50 points** (win 1, draw 0.5, loss 0), with verified terminal histories and no clock overrun above 0.1 seconds. Ties retain the old model; failed candidates and previous bests stay saved.
 - Gates resume across sessions and never enter replay. Models/settings/source are frozen; mismatched rules, altered weights or changed gate code are rejected. Restore the recorded source to continue an older-code gate, or explicitly restart it as below.
 
