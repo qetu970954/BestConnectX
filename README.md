@@ -2,7 +2,7 @@
 
 Original AlphaZero-style self-play + verified TSS for **square-board connection games**. Train from the CLI; play and inspect results in the browser.
 
-**Status:** CPU-tested pipeline, not a proven strong learned bot. No GPU training was run for this delivery. Existing Connect6 data is preserved and is not Gomoku training data.
+**Status:** Fresh framework, with no saved runs, games or trained models. Existing local data and generated reports were cleared at the user's request. CPU tests validate the pipeline—not playing strength. No real training or GPU job was started for this cleanup.
 
 ## Start
 
@@ -31,8 +31,8 @@ Windows: `start.cmd` opens the dashboard. Default URL: **http://127.0.0.1:8765**
 Run the **same training command** to resume. Sessions default to two hours; `--hours` changes the limit. Ctrl+C requests a safe checkpoint—wait for the save message before closing. An abrupt kill can lose work since the last save.
 
 ```sh
-uv run python -m gomoku status --data data/connect5-9x9-s1-o1-v1
-uv run python -m gomoku stop --data data/connect5-9x9-s1-o1-v1
+uv run python -m engine status --data data/connect5-9x9-s1-o1-v1
+uv run python -m engine stop --data data/connect5-9x9-s1-o1-v1
 uv run python dashboard.py --data data/connect6-19x19-s2-o1-v1 --open-browser
 ```
 
@@ -51,25 +51,21 @@ The browser has **no training controls**. Pause CLI work before bot play. It sup
 - Snapshots produced while a gate is pending stay queued on disk. Each queued gate freezes the then-current best when it starts.
 - Gate slices reuse their two frozen networks while still rechecking file checksums; model loading counts toward evaluation time. Whole-turn overtime survives pauses between stones.
 - Replace the incumbent only above **50 points** (win 1, draw 0.5, loss 0), with verified terminal histories and no clock overrun above 0.1 seconds. Ties retain the old model; failed candidates and previous bests stay saved.
-- Gates resume across sessions and never enter replay. Models/settings/source are frozen; mismatched rules, altered weights or changed gate code are rejected. Restore the recorded source to continue an older-code gate, or explicitly restart it as below.
+- Gates resume across sessions and never enter replay. Models/settings/source are frozen; mismatched rules, altered weights or changed gate code are rejected.
 
 This is an internal raw-score comparison, **not Elo, a confidence guarantee or proof of external strength**. Timed search is cooperative; GPU kernels/OS stalls cannot be preempted. Model loading is outside thinking time.
 
-To adopt the faster framework for an **older pending gate**, after stopping the old process:
-
-```sh
-uv run python train.py --data data/connect5-9x9-s1-o1-v1 --parallel 64 --seconds 0.25 --restart-gate
-```
-
-Use `--restart-gate` **once**. It archives the previous gate byte-for-byte under `gate-archive/` and restarts the same frozen models without mixing old results. Weights, optimizer, replay and training games remain intact. Subsequent runs omit `--restart-gate`.
+**Fresh start: do not use `--restart-gate`.** For a future unfinished gate after changing search code/limits, that flag explicitly archives the report and restarts the same frozen models without mixing old results. Omit it on normal resume.
 
 To finish a pending gate without training (**explicit evaluation-only mode bypasses the 80/20 scheduler**):
 
 ```sh
-uv run python -m gomoku evaluate --data data/connect5-9x9-s1-o1-v1 --report gate-model-00002000.json
+uv run python -m engine evaluate --data data/connect5-9x9-s1-o1-v1 --report gate-model-00002000.json
 ```
 
 ## Saved data
+
+New runs create their own `data/<rule-id>/` directory. Actual game records go in **`selfplay/game-*.json`**; the other files support training and resume. Generated artifacts are excluded by `.gitignore`, including custom run directories.
 
 | File/directory | Purpose |
 | --- | --- |
@@ -81,7 +77,7 @@ uv run python -m gomoku evaluate --data data/connect5-9x9-s1-o1-v1 --report gate
 | `metrics/`, `gate-model-*.json`, `gate-archive/` | Loss history, resumable matches and preserved superseded reports |
 | `source-*.zip` | Recorded game/search/training code |
 
-Old `rules.json` metadata remains readable; existing files are not deleted. Stored data supports replay, loading existing models and continued training without starting over. Seeds do not promise bit-identical timed training across runtimes.
+Once a run exists, stored data supports replay, loading existing models and continued training without starting over. Older configurable metadata remains readable. Seeds do not promise bit-identical timed training across runtimes.
 
 The default artifact cap is **20 GiB** (`--disk-gib` adjusts it). Atomic writes reserve the old file, incoming file and a metadata margin. On exhaustion, stop and retain the previous checkpoint; never silently prune. Pending dataset exports are retained in the checkpoint and retried. Software environments/caches are separate.
 
@@ -89,13 +85,26 @@ The default artifact cap is **20 GiB** (`--disk-gib` adjusts it). Atomic writes 
 
 ```sh
 uv run python -m unittest discover -s tests -v
-uv run --group browser python tests/connection_ui_smoke.py
+uv run --group browser python tests/ui_smoke.py
 ```
 
 Browser checks use installed Chrome, CPU and disposable data directories. Set `CHROME_EXECUTABLE` if needed; no browser is downloaded.
 
-`gomoku/game.py` owns rules; `gomoku/training.py` owns learning/storage/gates; `gomoku/web.py` serves play/results. Thin CLI adapters connect them. No plugin framework or new frontend dependencies.
+One package, **`engine/`**, supports both games by changing rules—not switching implementations:
+
+```text
+train.py, dashboard.py          User-facing entry points
+engine/game.py                 Rules and one configurable Game
+engine/network.py, search.py   Policy/value network and batched MCTS
+engine/tactics.py, tss.py       Tactical search and independent proof verification
+engine/selfplay.py             Placement decisions and optimizer updates
+engine/training.py, storage.py  Checkpoints, datasets, milestones and frozen gates
+engine/cli.py, play.py, web.py  CLI and local play/results adapters
+engine/static/                 One dashboard frontend
+```
+
+No legacy-package wrappers, plugin framework or new frontend dependencies. `train.py` and `dashboard.py` commands are unchanged; auxiliary commands now use `python -m engine` instead of `python -m gomoku`.
 
 [Requirements](docs/alignment.md) · [Validation](docs/connection-validation.md) · [Recent arXiv research](docs/training-research.md)
 
-Legacy fixed-19×19 commands remain under `python -m connect6`; their `data/` weights/replay/reports are unchanged. Do not point the new trainer at legacy `data/latest.pt`. Historical strength results are in [tactical-results.md](docs/tactical-results.md), not evidence of a strong new Gomoku model.
+The old fixed-rule trainer/UI, duplicate packages and generated historical results are removed. Git history retains the old source; ignored local training data was deliberately deleted and is not recoverable from Git. Curated `tests/fixtures/` positions are regression inputs, not a training dataset. No legacy fixed-format migration is provided.

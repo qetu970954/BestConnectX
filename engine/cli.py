@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 import sys
-from connect6.storage import busy, load_json
+from .storage import busy, load_json
 from .game import DEFAULT_RULES, Rules, parse_board
 
 

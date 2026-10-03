@@ -5,10 +5,11 @@ from pathlib import Path
 import time
 import unittest
 import numpy as np
-from connect6.game import Game, heuristic
-from connect6.tactics import forcing_win, verifies
-from connect6.training import turn_action
+from engine.game import Game, Rules, heuristic
+from engine.tactics import forcing_win, verifies
+from engine.selfplay import turn_action
 
+CONNECT6 = Rules(19, 19, 6, 2, 1)
 FIXTURES = json.loads((Path(__file__).parent / 'fixtures/forks.json').read_text())['selected_fixtures']
 
 
@@ -32,7 +33,7 @@ def independent_completions(game, player):
 class TacticalTests(unittest.TestCase):
     def test_selected_forks_and_every_defensive_pair(self):
         for fixture in FIXTURES:
-            game = Game.from_moves(fixture['moves'])
+            game = Game.from_moves(fixture['moves'], rules=CONNECT6)
             self.assertFalse(game.done)
             self.assertFalse(game.threats(game.player, game.left))
             self.assertFalse(verifies(game, fixture['baseline']))
@@ -52,7 +53,7 @@ class TacticalTests(unittest.TestCase):
                 self.assertTrue(any(reply & e == 0 for e in attack))
 
     def test_symmetries_and_player_perspective(self):
-        base = Game.from_moves(FIXTURES[0]['moves'])
+        base = Game.from_moves(FIXTURES[0]['moves'], rules=CONNECT6)
         for k in range(4):
             for flip in (False, True):
                 indices = np.arange(361).reshape(19, 19)
@@ -60,7 +61,7 @@ class TacticalTests(unittest.TestCase):
                 if flip:
                     transformed = transformed[:, ::-1]
                 mapping = np.argsort(transformed.ravel())
-                game = Game.from_moves([int(mapping[m]) for m in base.moves])
+                game = Game.from_moves([int(mapping[m]) for m in base.moves], rules=CONNECT6)
                 proof = forcing_win(game, deadline=time.monotonic() + 5)
                 self.assertIsNotNone(proof)
                 self.assertTrue(verifies(game, proof))
@@ -68,17 +69,17 @@ class TacticalTests(unittest.TestCase):
                 self.assertTrue(verifies(swapped, proof))
 
     def test_counterwin_unknown_and_partial_turn(self):
-        game = Game(); game.left = 2
+        game = Game(rules=CONNECT6); game.left = 2
         game.board[[9*19+c for c in (5,6,7)] + [r*19+8 for r in (5,6,7)]] = 1
         self.assertTrue(verifies(game, (179, 160)))
         game.board[:5] = -1
         self.assertFalse(verifies(game, (179, 160)))  # opponent wins before blocking
         self.assertIsNone(forcing_win(game, deadline=0))
         self.assertIsNone(forcing_win(game, deadline=time.monotonic()+5, stopped=lambda: True))
-        self.assertIsNone(forcing_win(Game(), deadline=time.monotonic()+5))
+        self.assertIsNone(forcing_win(Game(rules=CONNECT6), deadline=time.monotonic()+5))
         self.assertFalse(verifies(game, (179,)))  # not a complete turn
         self.assertFalse(verifies(game, (179, 179)))
-        game = Game.from_moves(FIXTURES[0]['moves'])
+        game = Game.from_moves(FIXTURES[0]['moves'], rules=CONNECT6)
         proof = FIXTURES[0]['certificate']
         game.play(proof[0])
         found = forcing_win(game, deadline=time.monotonic()+5)
@@ -86,7 +87,7 @@ class TacticalTests(unittest.TestCase):
         self.assertTrue(verifies(game, found))
 
     def test_plan_is_committed_only_with_placement(self):
-        game = Game.from_moves(FIXTURES[0]['moves']); original = game.copy()
+        game = Game.from_moves(FIXTURES[0]['moves'], rules=CONNECT6); original = game.copy()
         plan = []
         first = turn_action(game, None, 5, 1, lambda: False, tactics=True, plan=plan)
         self.assertEqual(len(plan), 2)
@@ -98,7 +99,7 @@ class TacticalTests(unittest.TestCase):
         game.play(second); restored.pop(0)
         self.assertEqual(restored, [])
         self.assertTrue(verifies(original, (first, second)))
-        # Legacy incumbent stays unchanged unless tactics are explicitly enabled.
+        # Tactical search is opt-in at this shared placement interface.
         self.assertEqual(turn_action(original, None, 5, 1, lambda: False), heuristic(original))
 
 

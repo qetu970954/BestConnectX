@@ -5,17 +5,18 @@ import time
 import unittest
 from unittest.mock import patch
 
-from connect6.game import Game
-from connect6.tss import search_tss, verify_tss
-from connect6.training import turn_action
+from engine.game import Game, Rules
+from engine.tss import search_tss, verify_tss
+from engine.selfplay import turn_action
 
+CONNECT6 = Rules(19, 19, 6, 2, 1)
 MULTITURN = json.loads((Path(__file__).parent / "fixtures/tss-multiturn.json").read_text())
 
 
 class TSSIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.root = Game.from_moves(MULTITURN["moves"])
+        cls.root = Game.from_moves(MULTITURN["moves"], rules=CONNECT6)
         cls.proof = search_tss(cls.root, max_turns=3,
                                deadline=time.perf_counter() + 5, max_nodes=2_000_000,
                                width=64, max_candidates=5_000)
@@ -26,7 +27,7 @@ class TSSIntegrationTests(unittest.TestCase):
         game = self.root.copy()
         plan, proof_plan, strategy = [], [None], [None]
         # Inject the actual independently checked three-turn fixture proof into play.
-        with patch("connect6.training.search_tss", return_value=self.proof):
+        with patch("engine.selfplay.search_tss", return_value=self.proof):
             first = turn_action(game, None, 5, 1, lambda: False, tactics=True, tss=True,
                                 plan=plan, proof_plan=proof_plan, strategy=strategy)
         game.play(first)
@@ -80,7 +81,7 @@ class TSSIntegrationTests(unittest.TestCase):
                 "plan": list(self.proof["tree"]["moves"]),
                 "tss_proof": self.proof,
                 "tss_strategy": {"history": list(self.root.moves), "proof": self.proof}}
-        game = Game.from_moves(gate["moves"])
+        game = Game.from_moves(gate["moves"], rules=CONNECT6)
         plan = list(gate["plan"])
         proof_plan = [gate["tss_proof"]]
         strategy = [gate["tss_strategy"]]

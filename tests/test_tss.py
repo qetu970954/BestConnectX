@@ -6,17 +6,18 @@ import time
 import unittest
 from unittest.mock import patch
 
-from connect6.game import Game
-from connect6.tss import _Budget, _verified_defenses, search_tss, verify_tss
-from connect6.training import turn_action
+from engine.game import Game, Rules
+from engine.tss import _Budget, _verified_defenses, search_tss, verify_tss
+from engine.selfplay import turn_action
 
+CONNECT6 = Rules(19, 19, 6, 2, 1)
 FIXTURE = json.loads((Path(__file__).parent / "fixtures/forks.json").read_text())["selected_fixtures"][0]
 MULTITURN = json.loads((Path(__file__).parent / "fixtures/tss-multiturn.json").read_text())
 
 
 class TSSPublicContractTests(unittest.TestCase):
     def test_search_returns_independently_verifiable_forced_win(self):
-        game = Game.from_moves(FIXTURE["moves"])
+        game = Game.from_moves(FIXTURE["moves"], rules=CONNECT6)
         proof = search_tss(game, max_turns=2, deadline=time.perf_counter() + 10,
                            max_nodes=100_000, width=64, max_candidates=5_000)
         self.assertIsNotNone(proof)
@@ -25,12 +26,12 @@ class TSSPublicContractTests(unittest.TestCase):
                                    max_nodes=100_000))
 
     def test_candidate_play_keeps_a_verified_turn_plan_across_stones(self):
-        game = Game.from_moves(FIXTURE["moves"])
+        game = Game.from_moves(FIXTURE["moves"], rules=CONNECT6)
         proof = search_tss(game, max_turns=2, deadline=time.perf_counter() + 5,
                            max_nodes=100_000, width=64, max_candidates=5_000)
         self.assertIsNotNone(proof)
         plan, proof_plan = [], [None]
-        with patch("connect6.training.search_tss", return_value=proof):
+        with patch("engine.selfplay.search_tss", return_value=proof):
             first = turn_action(game, None, 5, 1, lambda: False, tactics=True, tss=True,
                                 plan=plan, proof_plan=proof_plan)
         self.assertEqual(plan, proof["tree"]["moves"])
@@ -44,7 +45,7 @@ class TSSPublicContractTests(unittest.TestCase):
         self.assertNotEqual(game.player, 1)
 
     def test_verifier_requires_every_filler_reply_to_a_single_blocker(self):
-        game = Game()
+        game = Game(rules=CONNECT6)
         game.board[:2] = 1
         game.left = 2
         after_attack = game.copy()
@@ -57,8 +58,8 @@ class TSSPublicContractTests(unittest.TestCase):
                                     max_nodes=10_000))
 
     def test_verifier_recursively_checks_all_defensive_continuations(self):
-        fixture_game = Game.from_moves(FIXTURE["moves"])
-        root = Game(fixture_game.board.copy(), fixture_game.player, 2)
+        fixture_game = Game.from_moves(FIXTURE["moves"], rules=CONNECT6)
+        root = Game(fixture_game.board.copy(), fixture_game.player, 2, rules=CONNECT6)
         root.board[[0, 1, 2, 19, 20, 21]] = root.player
         after_attack = root.copy()
         after_attack.play(3)
@@ -82,7 +83,7 @@ class TSSPublicContractTests(unittest.TestCase):
                                     max_nodes=100_000))
 
     def test_verifier_rejects_opponent_counterwin(self):
-        game = Game()
+        game = Game(rules=CONNECT6)
         game.board[:2] = 1
         game.left = 2
         game.board[19:24] = -1
@@ -92,7 +93,7 @@ class TSSPublicContractTests(unittest.TestCase):
                                     max_nodes=10_000))
 
     def test_limits_are_unknown_not_loss(self):
-        game = Game.from_moves(FIXTURE["moves"])
+        game = Game.from_moves(FIXTURE["moves"], rules=CONNECT6)
         self.assertIsNone(search_tss(game, max_turns=3, deadline=time.perf_counter() - 1,
                                      max_nodes=100_000))
         self.assertIsNone(search_tss(game, max_turns=2, deadline=time.perf_counter() + 5,
@@ -101,7 +102,7 @@ class TSSPublicContractTests(unittest.TestCase):
                                      max_nodes=100_000))
 
     def test_legal_history_multiturn_discovery_needs_three_turns(self):
-        game = Game.from_moves(MULTITURN["moves"])
+        game = Game.from_moves(MULTITURN["moves"], rules=CONNECT6)
         self.assertFalse(game.done)
         self.assertIsNone(search_tss(game, max_turns=2, deadline=time.perf_counter() + 5,
                                      max_nodes=2_000_000, width=64, max_candidates=5_000))
@@ -114,7 +115,7 @@ class TSSPublicContractTests(unittest.TestCase):
                                    max_nodes=10_000))
 
     def test_verifier_reply_coverage_matches_exhaustive_oracle(self):
-        game = Game()
+        game = Game(rules=CONNECT6)
         empty = list(range(9))
         game.board.fill(1)
         game.board[empty] = 0
@@ -134,7 +135,7 @@ class TSSPublicContractTests(unittest.TestCase):
                 self.assertEqual(actual, expected)
 
     def test_verifier_rejects_attack_moves_crossing_turn_boundary(self):
-        game = Game()
+        game = Game(rules=CONNECT6)
         game.left = 1
         game.board[[0, 1, 2, 3, 19, 20, 21, 22]] = 1
         proof = {"version": 1, "attacker": 1, "max_turns": 2,
@@ -143,15 +144,14 @@ class TSSPublicContractTests(unittest.TestCase):
                                     max_nodes=100_000))
 
     def test_terminal_and_draw_positions_do_not_produce_wins(self):
-        terminal = Game()
+        terminal = Game(rules=CONNECT6)
         terminal.done, terminal.winner = True, 1
         self.assertIsNone(search_tss(terminal, max_turns=2, deadline=time.perf_counter() + 1))
         proof = {"version": 1, "attacker": 1, "max_turns": 2,
                  "tree": {"moves": [0], "responses": []}}
         self.assertFalse(verify_tss(terminal, proof, deadline=time.perf_counter() + 1))
-
         sequence = (1, -1, 1, -1, 1, -1, 1)
-        draw = Game()
+        draw = Game(rules=CONNECT6)
         draw.board[:] = [sequence[(row + 2 * col) % len(sequence)]
                          for row in range(19) for col in range(19)]
         draw.board[[0, 1]] = 0
@@ -165,7 +165,7 @@ class TSSPublicContractTests(unittest.TestCase):
                                      max_nodes=100_000, width=64, max_candidates=5_000))
 
     def test_cancellation_is_unknown_and_malformed_certificates_are_rejected(self):
-        game = Game()
+        game = Game(rules=CONNECT6)
         game.left = 1
         game.board[:5] = 1
         proof = {"version": 1, "attacker": 1, "max_turns": 1,

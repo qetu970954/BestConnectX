@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 from torch import nn
-from .game import SIZE
+from .game import DEFAULT_RULES
 
 
 class Residual(nn.Module):
@@ -18,7 +18,7 @@ class Residual(nn.Module):
 
 
 class Network(nn.Module):
-    def __init__(self, channels=64, blocks=4, size=SIZE):
+    def __init__(self, channels=32, blocks=2, size=DEFAULT_RULES.height):
         super().__init__()
         self.config = {"channels": channels, "blocks": blocks, "size": size}
         self.trunk = nn.Sequential(nn.Conv2d(8, channels, 3, padding=1, bias=False),

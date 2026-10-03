@@ -1,7 +1,7 @@
 [project]
 name = "bestconnect6"
 version = "0.1.0"
-description = "Original single-GPU Connect6 self-play research engine"
+description = "Original self-play engine for square-board connection games"
 requires-python = ">=3.12"
 dependencies = ["numpy>=2,<3", "torch>=2.7,<3"]
 

@@ -6,13 +6,15 @@ import math
 from pathlib import Path
 import statistics
 import time
-from connect6.game import Game, heuristic
-from connect6.tactics import forcing_win, verifies
+from engine.game import Game, Rules, heuristic
+from engine.tactics import forcing_win, verifies
+
+CONNECT6 = Rules(19, 19, 6, 2, 1)
 
 fixtures = json.loads((Path(__file__).resolve().parent.parent / 'tests/fixtures/forks.json').read_text())
 results = []
 for case in fixtures['selected_fixtures']:
-    game = Game.from_moves(case['moves'])
+    game = Game.from_moves(case['moves'], rules=CONNECT6)
     before = game.copy(); baseline = []
     while not before.done and before.player == game.player:
         move = heuristic(before); baseline.append(move); before.play(move)

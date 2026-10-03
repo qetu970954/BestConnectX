@@ -11,15 +11,14 @@ import unittest
 from unittest.mock import patch
 import numpy as np
 import torch
-from gomoku.game import Game, Rules, parse_board
-from gomoku import training
-from gomoku.web import history
-from connect6.game import heuristic
-from connect6.network import Network, augment, device_for
-from connect6.search import search
-from connect6.storage import GIB, load_checkpoint, save_checkpoint, save_json
-from connect6.training import observation, selfplay_batch, train_step
-from connect6.tss import search_tss, verify_tss
+from engine.game import Game, Rules, parse_board, heuristic
+from engine import training
+from engine.web import history
+from engine.network import Network, augment, device_for
+from engine.search import search
+from engine.storage import GIB, load_checkpoint, save_checkpoint, save_json
+from engine.selfplay import observation, selfplay_batch, train_step
+from engine.tss import search_tss, verify_tss
 
 PROJECT = Path(__file__).resolve().parent.parent
 
@@ -29,7 +28,7 @@ def cli(*args, stdin=None):
                           capture_output=True, text=True, timeout=90)
 
 
-class GomokuTests(unittest.TestCase):
+class EngineTests(unittest.TestCase):
     def test_single_stone_rules_and_freestyle_wins(self):
         game = Game()
         for move, player in ((0, -1), (9, 1), (1, -1), (10, 1)):
@@ -100,7 +99,7 @@ class GomokuTests(unittest.TestCase):
         metric = {}
         train_step(net, torch.optim.AdamW(net.parameters()), [sample], 2,
                    np.random.default_rng(0), torch.device('cpu'), metrics=metric,
-                   game_type=lambda board, player, left: Game(board, player, left, rules=rules))
+                   rules=rules)
         self.assertAlmostEqual(metric['loss'], metric['policy_loss'] + metric['value_loss'], places=5)
         self.assertFalse(torch.equal(before, net.policy.weight))
         x, p = np.zeros((1, 8, 5, 5), dtype=np.float32), np.zeros((1, 25), dtype=np.float32)
@@ -125,7 +124,7 @@ class GomokuTests(unittest.TestCase):
         self.assertIsNotNone(proof)
         self.assertIs(verify_tss(game, proof, deadline=time.perf_counter() + 2), True)
         decisions = selfplay_batch([game], None, 1, np.random.default_rng(0), bootstrap=True,
-                                  tactical_ms=50, strategies=[None], adjudicate_proofs=False)
+                                  tactical_ms=50, strategies=[None])
         self.assertEqual(decisions[0]['source'], 'tss_move')
         self.assertNotIn('winner', decisions[0])
         game.play(int(decisions[0]['policy'].argmax()))
@@ -139,7 +138,7 @@ class GomokuTests(unittest.TestCase):
             game = Game(rules=Rules(4, 4, 3, 1, 2))
             strategies, plans = [None], [[]]
             kwargs = dict(bootstrap=True, tactical_ms=50, strategies=strategies, plans=plans,
-                          tss_enabled=tss_enabled, adjudicate_proofs=False)
+                          tss_enabled=tss_enabled)
             first = selfplay_batch([game], None, 1, np.random.default_rng(0), **kwargs)[0]
             self.assertEqual(first['source'], 'tss_move' if tss_enabled else 'proof_move')
             self.assertEqual(len(first['proof']), 2)
@@ -222,14 +221,14 @@ class GomokuTests(unittest.TestCase):
             self.assertEqual(saved['games'], 2)
             for path in (Path(name) / 'selfplay').glob('*.json'):
                 self.assertTrue(Game.from_moves(json.loads(path.read_text())['moves'], rules=rules).done)
-            result = cli('-m', 'gomoku', 'play', '--data', name, '--model', 'latest', '--device', 'cpu',
+            result = cli('-m', 'engine', 'play', '--data', name, '--model', 'latest', '--device', 'cpu',
                          '--seconds', '.02', stdin=json.dumps({'moves': [84]}))
             self.assertEqual(result.returncode, 0, result.stderr)
             reply = json.loads(result.stdout)
             self.assertEqual(len(reply['moves']), 2)
             game = Game.from_moves([84, *reply['moves']], rules=rules)
             self.assertEqual((game.player, game.left), (1, 2))
-            result = cli('-m', 'gomoku', 'play', '--data', name, '--model', '../latest.pt',
+            result = cli('-m', 'engine', 'play', '--data', name, '--model', '../latest.pt',
                          '--device', 'cpu', stdin=json.dumps({'moves': [84]}))
             self.assertNotEqual(result.returncode, 0)
             original = (Path(name) / 'latest.pt').read_bytes()
@@ -501,6 +500,75 @@ class GomokuTests(unittest.TestCase):
                 training.restart_gate(root, gate, rules, settings, training._source()[1], 20 * GIB)
             self.assertEqual((root / gate).read_bytes(), unchanged)
 
+    def test_pre_consolidation_checkpoint_resumes_without_old_packages(self):
+        with tempfile.TemporaryDirectory() as name:
+            root, rules = Path(name), Rules(4, 4, 4)
+            net = Network(channels=4, blocks=1, size=4)
+            settings = dict(seed=5070, parallel=2, batch=2, simulations=2, bootstrap_games=16,
+                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=5.)
+            for games in (8, 16):
+                save_checkpoint(root / f'models/model-{games:08d}.pt', training.snapshot(net, 32, rules, games),
+                                20 * GIB, root=root)
+            opponent = {'file': 'models/model-00000008.pt', 'games': 8, 'kind': 'network', 'rules': rules.id,
+                        'sha256': training.digest(root / 'models/model-00000008.pt')}
+            save_json(root / 'incumbent.json', opponent)
+            save_json(root / 'run.json', {'rules': rules.id, 'rule_config': rules.to_dict(), 'settings': settings})
+            gate = training.next_gate(root, rules, settings, 'before-engine-package', 20 * GIB)
+            state = training.snapshot(net, 32, rules, 16)
+            state['config'] = {**state['config'], 'width': 4}  # Older square checkpoints used this field.
+            game = Game.from_moves([5], rules=rules)
+            policy = np.zeros(16, dtype=np.float32); policy[0] = 1
+            sample = {**observation(game, policy), 'result': 1., 'source': 'mcts'}
+            state.update(settings=settings, optimizer=torch.optim.AdamW(net.parameters()).state_dict(),
+                since_update=0, replay=[sample], active=[{'moves': [5], 'opening': [5], 'samples': [],
+                'turns': [], 'strategies': [None, None], 'plans': [[], []]}], last_milestone=16, gate=gate,
+                pending_games=[], pending_metrics=[], loss_metrics=None, legacy_note={'preserve': True},
+                rng=np.random.default_rng(5070).bit_generator.state, torch_rng=torch.get_rng_state())
+            save_checkpoint(root / 'latest.pt', state, 20 * GIB, root=root)
+            original = (root / 'latest.pt').read_bytes()
+            old_report = (root / gate).read_bytes()
+            frozen = [path.read_bytes() for path in sorted((root / 'models').glob('*.pt'))]
+            command = ['train.py', '--data', name, '--connect', '4', '--board_size', '4*4',
+                       '--device', 'cpu', '--hours', '.01', '--max-games', '16']
+            result = cli(*command)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('--restart-gate', result.stderr)
+            self.assertEqual((root / 'latest.pt').read_bytes(), original)
+            result = cli(*command, '--restart-gate')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            resumed = training.load_state(root / 'latest.pt', rules)
+            self.assertEqual((resumed['games'], resumed['step']), (16, 32))
+            self.assertEqual(resumed['active'], state['active'])
+            self.assertEqual(resumed['legacy_note'], state['legacy_note'])
+            self.assertEqual(resumed['rng'], state['rng'])
+            torch.testing.assert_close(resumed['torch_rng'], state['torch_rng'], rtol=0, atol=0)
+            torch.testing.assert_close(resumed['weights'], state['weights'], rtol=0, atol=0)
+            self.assertEqual(len(resumed['replay']), 1)
+            for key, value in sample.items():
+                if isinstance(value, torch.Tensor):
+                    torch.testing.assert_close(resumed['replay'][0][key], value, rtol=0, atol=0)
+                else:
+                    self.assertEqual(resumed['replay'][0][key], value)
+            self.assertEqual(resumed['optimizer'], state['optimizer'])
+            self.assertEqual([path.read_bytes() for path in sorted((root / 'models').glob('*.pt'))], frozen)
+            report = json.loads((root / gate).read_text())
+            self.assertEqual((root / report['restart_from']).read_bytes(), old_report)
+            self.assertEqual(report['seconds_per_turn'], .25)
+            self.assertFalse((PROJECT / 'connect6').exists())
+            self.assertFalse((PROJECT / 'gomoku').exists())
+
+    def test_retired_fixed_format_is_rejected_without_overwriting_data(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            save_checkpoint(root / 'latest.pt', {'format': 1, 'rules': 'connect6',
+                'config': {'size': 19}, 'weights': {}}, 20 * GIB, root=root)
+            original = (root / 'latest.pt').read_bytes()
+            result = cli('train.py', '--data', name, '--device', 'cpu', '--hours', '.01')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Checkpoint rules', result.stderr)
+            self.assertEqual((root / 'latest.pt').read_bytes(), original)
+            self.assertFalse((root / 'run.json').exists())
+
     def test_large_selfplay_batch_reaches_network_together(self):
         device_for('cpu')
         net = Network(channels=4, blocks=1, size=9)
@@ -510,8 +578,7 @@ class GomokuTests(unittest.TestCase):
             return evaluate(games)
         net.evaluate = counted
         games = [Game.from_moves([40, 0, 41]) for _ in range(64)]
-        decisions = selfplay_batch(games, net, 2, np.random.default_rng(0), tactical_ms=0,
-                                  adjudicate_proofs=False)
+        decisions = selfplay_batch(games, net, 2, np.random.default_rng(0), tactical_ms=0)
         self.assertEqual(sizes, [64, 64, 64])
         self.assertTrue(all(row['source'] == 'mcts' for row in decisions))
 

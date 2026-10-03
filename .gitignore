@@ -1,5 +1,30 @@
+# Python environment and caches
 .venv/
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Generated runs, including custom --data directories
 data/
+selfplay/
+replay/
+models/
+metrics/
+gate-archive/
+*.pt
 *.log
+*.tmp
+run.json
+rules.json
+status.json
+incumbent.json
+run.lock
+stop
+gate-model-*.json
+source-*.zip
+
+# Generated measurements and screenshots
+docs/*-benchmark*.json
+docs/*-gate.json
+docs/*-screen.json
+docs/*dashboard.png
+experiments/*_results.json

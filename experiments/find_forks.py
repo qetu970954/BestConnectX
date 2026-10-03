@@ -5,14 +5,14 @@ These selected examples are regression fixtures, NOT an unbiased match benchmark
 import json
 import time
 import numpy as np
-from connect6.game import Game, heuristic
-from connect6.tactics import forcing_win, verifies
+from engine.game import Game, Rules, heuristic
+from engine.tactics import forcing_win, verifies
 
 rng = np.random.default_rng(65070)
 found = []
 checked = 0
 for game_id in range(30):
-    game = Game(); game.play(180)
+    game = Game(rules=Rules(19, 19, 6, 2, 1)); game.play(180)
     pool = [r * 19 + c for r in range(5, 14) for c in range(5, 14) if r * 19 + c != 180]
     for action in rng.choice(pool, 4, replace=False):
         game.play(int(action))

@@ -13,16 +13,16 @@ import time
 import zipfile
 import numpy as np
 import torch
-from connect6.network import Network, device_for
-from connect6.search import choose
-from connect6.storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
-                              save_checkpoint, save_json, usage)
-from connect6.training import model_state, selfplay_batch, selfplay_samples, train_step, turn_action
+from .network import Network, device_for
+from .search import choose
+from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
+                      save_checkpoint, save_json, usage)
+from .selfplay import selfplay_batch, selfplay_samples, train_step, turn_action
 from .game import DEFAULT_RULES, Game, Rules
 
 GATE_GAMES = 100
-SOURCE_FILES = ["gomoku/game.py", "gomoku/training.py", "connect6/game.py", "connect6/network.py",
-                "connect6/search.py", "connect6/training.py", "connect6/tactics.py", "connect6/tss.py"]
+SOURCE_FILES = ["engine/game.py", "engine/training.py", "engine/network.py", "engine/search.py",
+                "engine/selfplay.py", "engine/tactics.py", "engine/tss.py", "engine/storage.py"]
 PROJECT = Path(__file__).resolve().parent.parent
 
 
@@ -50,7 +50,9 @@ def load_state(path, rules=None):
 
 
 def snapshot(net, step, rules=DEFAULT_RULES, games=0):
-    return {**model_state(net, step), "rules": rules.id, "rule_config": rules.to_dict(), "games": games}
+    return {"format": 1, "config": net.config, "step": step,
+            "weights": {k: v.detach().cpu() for k, v in net.state_dict().items()},
+            "rules": rules.id, "rule_config": rules.to_dict(), "games": games}
 
 
 def network(root, entry, device, rules, *, cache=None):
@@ -471,7 +473,7 @@ def _train(args, root, rules):
                 while pending and not stopped():
                     metric = {}
                     train_step(net, optimizer, replay, settings["batch"], rng, device,
-                        game_type=lambda board, player, left: Game(board, player, left, rules=rules), metrics=metric)
+                        rules=rules, metrics=metric)
                     steps += 1
                     pending -= 1
                     settings["pending_updates"] = pending
@@ -499,7 +501,7 @@ def _train(args, root, rules):
                 plans = [list(row["plans"][slot]) for row, slot in zip(active, slots)]
                 decisions = selfplay_batch(batch_boards, net, settings["simulations"], rng,
                     bootstrap=games < settings["bootstrap_games"], tactical_ms=settings["tactical_ms"],
-                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans, adjudicate_proofs=False)
+                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans)
                 if decisions is None or stopped():
                     phase_seconds[phase] += time.monotonic() - began
                     break

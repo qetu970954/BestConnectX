@@ -1,10 +1,52 @@
-"""Standard 19x19 Connect6. Actions are single placements, not whole turns."""
-from dataclasses import dataclass, field
+"""Square-board connection games. Rules vary; the placement engine does not."""
+from dataclasses import asdict, dataclass, field
+from functools import lru_cache
+import re
 import numpy as np
 
-SIZE = 19
-CELLS = SIZE * SIZE
-def winning_lines(size, length):
+
+@dataclass(frozen=True)
+class Rules:
+    height: int = 9
+    width: int = 9
+    connect: int = 5
+    stones_per_turn: int = 1
+    starter_stones: int = 1
+
+    def __post_init__(self):
+        if any(type(value) is not int for value in asdict(self).values()):
+            raise ValueError("Rule values must be integers.")
+        if self.height != self.width:
+            raise ValueError('Only square boards are supported; use N*N, for example "9*9".')
+        if not (2 <= self.height <= 25 and 2 <= self.connect <= self.height):
+            raise ValueError("Board size must be 2..25; connect must be 2..the board size.")
+        if self.stones_per_turn not in (1, 2) or self.starter_stones not in (1, 2):
+            raise ValueError("This engine supports one- or two-stone turns and openings.")
+
+    @property
+    def id(self):
+        return f"connect{self.connect}-{self.height}x{self.width}-s{self.stones_per_turn}-o{self.starter_stones}-v1"
+
+    def to_dict(self):
+        return asdict(self)
+
+
+DEFAULT_RULES = Rules()
+
+
+def parse_board(text):
+    match = re.fullmatch(r"(\d+)[*xX×](\d+)", text)
+    if not match:
+        raise ValueError('Board size must be N*N, for example "9*9" or "19*19".')
+    height, width = map(int, match.groups())
+    if height != width:
+        raise ValueError('Only square boards are supported; use N*N, for example "9*9".')
+    return height, width
+
+
+@lru_cache(maxsize=32)
+def _lines(rules):
+    size, length = rules.height, rules.connect
     return np.array([[(r + k * dr) * size + c + k * dc for k in range(length)]
                      for r in range(size) for c in range(size)
                      for dr, dc in ((0, 1), (1, 0), (1, 1), (1, -1))
@@ -12,32 +54,50 @@ def winning_lines(size, length):
                      and 0 <= c + (length - 1) * dc < size], dtype=np.int32).reshape(-1, length)
 
 
-LINES = winning_lines(SIZE, 6)
-
-
 @dataclass
 class Game:
-    size = SIZE
-    win_length = 6
-    turn_stones = 2
-    lines = LINES
-    board: np.ndarray = field(default_factory=lambda: np.zeros(CELLS, dtype=np.int8))
+    board: np.ndarray | None = None
     player: int = 1
-    left: int = 1
+    left: int | None = None
     winner: int = 0
     done: bool = False
     moves: list[int] = field(default_factory=list)
+    rules: Rules = field(default_factory=Rules)
 
-    def copy(self):
-        return type(self)(self.board.copy(), self.player, self.left, self.winner,
-                    self.done, self.moves.copy())
+    def __post_init__(self):
+        if self.board is None:
+            self.board = np.zeros(self.rules.height * self.rules.width, dtype=np.int8)
+        if self.board.shape != (self.rules.height * self.rules.width,):
+            raise ValueError("Board data does not match the configured rules.")
+        if self.left is None:
+            self.left = self.rules.starter_stones
+
+    @property
+    def size(self):
+        return self.rules.height
 
     @property
     def shape(self):
         return self.size, self.size
 
+    @property
+    def win_length(self):
+        return self.rules.connect
+
+    @property
+    def turn_stones(self):
+        return self.rules.stones_per_turn
+
+    @property
+    def lines(self):
+        return _lines(self.rules)
+
     def empty(self):
-        return type(self)()
+        return Game(rules=self.rules)
+
+    def copy(self):
+        return Game(self.board.copy(), self.player, self.left, self.winner,
+                    self.done, self.moves.copy(), self.rules)
 
     def play(self, action):
         if isinstance(action, bool) or not isinstance(action, (int, np.integer)):
@@ -69,12 +129,12 @@ class Game:
             self.left = self.turn_stones
 
     @classmethod
-    def from_moves(cls, moves):
-        if not isinstance(moves, list) or len(moves) > cls.size ** 2:
-            raise ValueError(f"Expected a list of at most {cls.size ** 2} placements.")
-        game = cls()
-        for action in moves:
-            game.play(action)
+    def from_moves(cls, moves, *, rules=DEFAULT_RULES):
+        if not isinstance(moves, list) or len(moves) > rules.height * rules.width:
+            raise ValueError("Expected a move list no longer than the board's cell count.")
+        game = cls(rules=rules)
+        for move in moves:
+            game.play(move)
         return game
 
     def threats(self, player, budget=None):
@@ -109,7 +169,6 @@ class Game:
         if enemy:
             required = covers(enemy, self.left)
             if required:
-                # Any viable first defense can be completed within the remaining turn.
                 return np.array(sorted(set().union(*required)), dtype=np.int32)
         return np.flatnonzero(self.board == 0)
 
@@ -127,22 +186,20 @@ def covers(edges, budget):
 
 
 def heuristic_scores(game):
-    """Shared original line scores; no learned parameters."""
+    """Original line scores; no learned parameters."""
     scores = np.zeros(game.board.size, dtype=np.float64)
     cells = game.board[game.lines]
     own = np.sum(cells == game.player, axis=1)
     enemy = np.sum(cells == -game.player, axis=1)
     weights = np.where(enemy == 0, 5.0 ** own, 0) + np.where(own == 0, 4.0 ** enemy, 0)
     np.add.at(scores, game.lines.ravel(), np.repeat(weights, game.win_length))
-    # Prefer a central opening when all line scores tie.
-    height, width = game.shape
-    y, x = np.indices((height, width))
-    scores -= ((x - width // 2) ** 2 + (y - height // 2) ** 2).ravel() * .001
+    y, x = np.indices(game.shape)
+    scores -= ((x - game.size // 2) ** 2 + (y - game.size // 2) ** 2).ravel() * .001
     return scores
 
 
 def heuristic(game):
-    """Original, untrained fallback and baseline. Not a competitive-strength claim."""
+    """Untrained fallback, not a competitive-strength claim."""
     scores = heuristic_scores(game)
     legal = game.actions()
     if not len(legal):

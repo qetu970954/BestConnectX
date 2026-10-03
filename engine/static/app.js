@@ -1,6 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id), NS = 'http://www.w3.org/2000/svg';
-const token = document.querySelector('meta[name="gomoku-token"]').content;
+const token = document.querySelector('meta[name="engine-token"]').content;
 let state = null, history = {metrics: [], gates: [], models: []}, pending = false, polling = false;
 let size = 0;
 const cells = [];
@@ -108,7 +108,7 @@ async function refresh() {
 async function action(path, body) {
   if (pending) return false; pending = true; render(); let success = false;
   try {
-    const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Gomoku-Token': token}, body: JSON.stringify(body)});
+    const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Engine-Token': token}, body: JSON.stringify(body)});
     const reply = await response.json(); if (!response.ok) throw new Error(reply.error || 'Request failed.');
     notice(''); success = true;
   } catch (error) { notice(error.message, true); }

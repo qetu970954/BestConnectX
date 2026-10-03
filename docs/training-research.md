@@ -1,6 +1,6 @@
 # Recent self-play / board-game training research
 
-Reviewed 2026-10-02 against primary arXiv papers. This note supersedes the warm-start/pretrained-engine advice in `connect6-research.md` for the current work. Research ideas are allowed; copied game engines and pretrained bot weights are not.
+Reviewed 2026-10-02 against primary arXiv papers. Research ideas are allowed; copied game engines and pretrained bot weights are not. The repository ships the framework without generated training data or models.
 
 ## Decision for this delivery
 

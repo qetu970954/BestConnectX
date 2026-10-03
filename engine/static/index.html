@@ -2,19 +2,19 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="gomoku-token" content="__TOKEN__">
+<meta name="engine-token" content="__TOKEN__">
 <title>連棋 AI 研究室</title>
 <link rel="stylesheet" href="/style.css">
-<script src="/gomoku.js" defer></script>
+<script src="/app.js" defer></script>
 </head>
 <body class="dashboard">
 <header><a class="brand" href="/">連棋 AI <span class="muted">/ 成果儀表板</span></a><span class="local"><i></i> 僅限本機</span></header>
 <main>
 <section class="intro"><div class="eyebrow" id="rule-title">可設定的連棋規則</div><h1>自我對弈，<span>持續改進。</span></h1><p id="rule-detail">AlphaZero 式策略／價值網路與威脅空間搜尋。訓練使用 CLI；此頁用於對戰和查看實測結果。</p></section>
 <div class="workspace">
-<section class="board-panel" aria-label="五子棋對戰">
+<section class="board-panel" aria-label="連棋對戰">
 <div class="panel-heading"><div><span class="eyebrow">棋盤</span><h2 id="turn">黑棋先下</h2></div><span class="chip" id="placements">81 格</span></div>
-<div class="board-space"><div class="board-frame"><div id="board" data-game="flex" role="group" aria-label="棋盤，方向鍵移動，Enter下棋"></div></div></div>
+<div class="board-space"><div class="board-frame"><div id="board" role="group" aria-label="棋盤，方向鍵移動，Enter下棋"></div></div></div>
 <div class="board-footer"><span id="game-detail">連成五子或以上即可獲勝。</span><span id="move-count">0 手</span></div>
 <div class="play-controls"><label>執子顏色<select id="color"><option value="1">黑棋</option><option value="-1">白棋</option></select></label><label>對戰模型<select id="model"><option value="best">目前最佳</option><option value="heuristic">啟發式基準</option></select></label><label>思考秒數<input id="seconds" type="number" min="0.02" max="30" step="0.5" value="5"></label><button id="new-game" class="secondary">新對局</button><button id="bot-move" class="primary">AI 落子</button></div>
 <p class="caption">訓練期間使用 GPU 時，請先在 CLI 暫停訓練，再與 GPU AI 對戰。</p>

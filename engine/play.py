@@ -4,9 +4,9 @@ from pathlib import Path
 import re
 import sys
 import time
-from connect6.network import device_for
-from connect6.storage import load_json, run_lock
-from connect6.training import turn_action
+from .network import device_for
+from .storage import load_json, run_lock
+from .selfplay import turn_action
 from .game import DEFAULT_RULES, Game, Rules
 from .training import network
 

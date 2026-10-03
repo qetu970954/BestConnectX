@@ -1,4 +1,4 @@
-"""Local Gomoku board and read-only training dashboard; training itself uses the CLI."""
+"""Local connection-game board and results; training itself uses the CLI."""
 import json
 import math
 from pathlib import Path
@@ -7,10 +7,10 @@ import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from .game import DEFAULT_RULES, Game, Rules
-from connect6.storage import busy, load_json, save_json, usage
+from .storage import busy, load_json, save_json, usage
 
 ROOT = Path(__file__).resolve().parent.parent
-ASSETS = ROOT / "connect6" / "static"
+ASSETS = Path(__file__).resolve().parent / "static"
 
 
 def history(data):
@@ -70,9 +70,9 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
             if not self.valid_host():
                 return self.send(403, {"error": "Loopback host required."})
             if self.path == "/":
-                html = (ASSETS / "gomoku.html").read_text(encoding="utf-8").replace("__TOKEN__", token)
+                html = (ASSETS / "index.html").read_text(encoding="utf-8").replace("__TOKEN__", token)
                 return self.send(200, html.encode(), "text/html")
-            static = {"/gomoku.js": "gomoku.js", "/style.css": "style.css"}
+            static = {"/app.js": "app.js", "/style.css": "style.css"}
             if self.path in static:
                 return self.send(200, (ASSETS / static[self.path]).read_bytes(),
                                  "text/javascript" if self.path.endswith(".js") else "text/css")
@@ -94,7 +94,7 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
 
         def do_POST(self):
             nonlocal game, human, strategy, model_used
-            if (not self.valid_host() or self.headers.get("X-Gomoku-Token") != token
+            if (not self.valid_host() or self.headers.get("X-Engine-Token") != token
                     or self.headers.get("Origin") not in (origin, f"http://localhost:{port}")):
                 return self.send(403, {"error": "Invalid local request token or origin."})
             try:
@@ -125,11 +125,11 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                     if not isinstance(model, str) or len(model) > 80:
                         raise ValueError("Invalid model selection.")
                     request = {"moves": game.moves, "strategy": strategy if model == model_used else None}
-                    result = subprocess.run([sys.executable, "-m", "gomoku", "play", "--data", str(data),
+                    result = subprocess.run([sys.executable, "-m", "engine", "play", "--data", str(data),
                         "--model", model, "--seconds", str(seconds)], cwd=ROOT,
                         input=json.dumps(request), capture_output=True, text=True, timeout=120)
                     if result.returncode:
-                        raise RuntimeError("Gomoku bot failed: " + result.stderr[-1200:])
+                        raise RuntimeError("Bot failed: " + result.stderr[-1200:])
                     reply = json.loads(result.stdout)
                     updated = game.copy()
                     color = updated.player
@@ -142,7 +142,7 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                     game, strategy, model_used = updated, reply.get("strategy"), model
                 else:
                     return self.send(404, {"error": "Not found."})
-                return self.send(200, {"message": "OK"})
+                return self.send(200, {})
             except (ValueError, TypeError, KeyError) as exc:
                 self.send(400, {"error": str(exc)})
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
