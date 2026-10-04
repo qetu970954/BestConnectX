@@ -22,7 +22,7 @@
 
 ## 選擇此路徑的原因
 
-`engine/inference.cpp` 以 LibTorch 卷積、batch normalization、linear 及 activation 操作，實作與 `engine/network.py` 相同的一般殘差模型。Python 在安全點傳入更新權重及 running buffers；兩端共用寬度／深度／棋盤設定，並以相同輸入比對。
+`engine/inference.cpp` 以 LibTorch tensor 操作，實作與 `engine/network.py` 相同的殘差、池化及注意力架構。Python 在安全點傳入更新權重及 running buffers；兩端共用架構／寬度／深度／棋盤設定，並以相同輸入比對。
 
 建置使用已安裝 PyTorch wheel。本機 Windows 已驗證 MSVC Release 風格連結及 CPU／CUDA 推論，不需要 TorchScript／export loader、CMake 或另裝 CUDA SDK。這不代表已確認 Windows CUDA 的 AOTInductor 或 `torch.compile` 支援。
 

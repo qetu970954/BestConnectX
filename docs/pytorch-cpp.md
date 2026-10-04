@@ -22,7 +22,7 @@ Local paired search tests show a gain under the tested settings. They do not iso
 
 ## Why this route
 
-`engine/inference.cpp` implements the same plain residual model as `engine/network.py`, using LibTorch convolution, batch normalization, linear, and activation operations. Python passes updated weights and running buffers at safe points. Both paths share width/depth/board settings and are checked against the same inputs.
+`engine/inference.cpp` implements the same residual, pooled, and attention architectures as `engine/network.py`, using LibTorch tensor operations. Python passes updated weights and running buffers at safe points. Both paths share architecture/width/depth/board settings and are checked against the same inputs.
 
 The build uses the installed PyTorch wheel. On this Windows machine, MSVC Release-style linking and CPU/CUDA inference work. No TorchScript/export loader, CMake, or separate CUDA SDK is needed for this route. This does not establish Windows CUDA support for AOTInductor or `torch.compile`.
 

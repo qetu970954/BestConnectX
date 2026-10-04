@@ -28,7 +28,6 @@ def backend():
     lib.tactical.argtypes = [boards, ints, ints, C.c_int, C.c_int, ints, *([C.c_int]*5), C.c_double, STOP, ints, C.c_int]
     lib.runtime_search.argtypes = [boards, ints, ints, ints, C.c_int, C.c_void_p, C.c_int, C.c_int,
         C.c_uint64, C.c_int, C.c_double, STOP, floats, doubles]
-    lib.runtime_choose.argtypes = [floats, C.c_int, C.c_uint64, C.c_double]
     lib.runtime_decide.argtypes = [boards, ints, ints, ints, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_uint64,
         C.c_int, C.c_int, C.c_int, C.c_double, C.c_double, STOP, ints, ints, ints,
         floats, ints, ints, ints, ints, ints, C.c_int, doubles]
@@ -146,10 +145,19 @@ def opening(index, initial_seed, rules=DEFAULT_RULES, *, random_start=False):
 class NativeModel:
     """Independent inference weights. Never update them during a native search call."""
     def __init__(self, net):
+        from .config import ARCHITECTURES
         self.lib = backend()
         self.config = net.config.copy()
         self.device = str(next(net.parameters()).device)
-        self.handle = self.lib.model_create(self.config['size'], self.config['channels'], self.config['blocks'], self.device.encode())
+        architecture = ARCHITECTURES.index(self.config.get('architecture', 'residual'))
+        if architecture:
+            self.lib.model_create_variant.argtypes = [C.c_int, C.c_int, C.c_int, C.c_int, C.c_char_p]
+            self.lib.model_create_variant.restype = C.c_void_p
+            self.handle = self.lib.model_create_variant(self.config['size'], self.config['channels'],
+                self.config['blocks'], architecture, self.device.encode())
+        else:
+            self.handle = self.lib.model_create(self.config['size'], self.config['channels'],
+                self.config['blocks'], self.device.encode())
         if not self.handle:
             raise RuntimeError(self.lib.runtime_error().decode())
         self.cleanup = weakref.finalize(self, self.lib.model_destroy, self.handle)
@@ -172,9 +180,6 @@ class NativeModel:
         policy = np.empty((len(x), x.shape[-1]**2), dtype=np.float32); value = np.empty(len(x), dtype=np.float32)
         check(self.lib.model_predict(self.handle, x, len(x), x.shape[-1], policy, value))
         return policy, value
-
-    def evaluate(self, games):
-        return self.evaluate_features(np.stack([Game(g.board, g.player, g.left, g.winner, g.done, g.moves, g.rules).features() for g in games]))
 
 
 def model_for(net):

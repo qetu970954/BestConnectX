@@ -4,9 +4,7 @@
 
 **Status: approved. The user confirmed: “This scope is correct—start implementation.” The agreed scope is implemented; checks and limits are recorded in the [validation report](migration-validation.md).**
 
-This document records the current discussion. Recommendations are not approved unless marked as agreed.
-
-The older [requirements](alignment.md) and [ADR 0001](adr/0001-python-reference-and-native-search.md) describe earlier work. This approved agreement replaces their conflicting requirements.
+This document records the approved migration agreement. The later [model-experiment decision](adr/0002-shared-board-model-experiments.md) adds optional pooled and attention models without replacing the residual default. Housekeeping removes superseded reports and the half-native search path; the independent Python correctness references remain. Earlier implementation history is available in Git and [ADR 0001](adr/0001-python-reference-and-native-search.md).
 
 ## Agreed direction: rounds 1–3
 
@@ -25,7 +23,7 @@ The older [requirements](alignment.md) and [ADR 0001](adr/0001-python-reference-
 | Q11 | Resume is a must. Do not save self-play move records to local disk. | No finished-game kifu archive. Q17 allows bounded replay samples and unfinished games in the checkpoint. Q18 keeps small game summaries. |
 | Q12 | Approve the proposed test budget. | At most five minutes of total GPU-process wall time, including warmup. Temporary inference/search and short training/resume tests only. No persistent training. Ask before more GPU work. |
 | Q13 | Approve common English, short sentences, and defined technical terms. | Product names, code, commands, and paths are allowed. Do not claim a strict check against an unspecified 4,000-word list. |
-| Q14 | Approve the proposed doc layout. | Root English/Traditional Chinese READMEs. Active guides and cheatsheets in `docs/`, with `.zh-TW.md` partners. Old reports stay clearly marked as history. |
+| Q14 | Approve the proposed doc layout. | Root English/Traditional Chinese READMEs. Active guides and cheatsheets in `docs/`, with `.zh-TW.md` partners. Superseded reports are now removed under the housekeeping request; Git retains their history. |
 | Q15 | A: keep model updates in Python; self-play stays in C++. | Python/PyTorch runs loss, gradients, and optimizer updates. C++ runs inference and all playing. |
 | Q16 | A: configurable plain residual network. | Start 15×15 with 64 channels and 6 blocks. Provide smaller test and larger experiment presets. Other model families stay in the survey. |
 | Q17 | Accept checkpoint replay and active-game state. | Save a bounded recent replay window, weights, optimizer, active games, counters, pending work, and RNG state. No permanent per-game replay exports. |
@@ -33,36 +31,6 @@ The older [requirements](alignment.md) and [ADR 0001](adr/0001-python-reference-
 | Q19 | Yes: native workers and batched C++ inference. | Native CPU workers feed one batched C++ GPU inference path. Alternate generation and Python learning at safe points. Do not update weights during active search batches. No separate actor/learner service in the first release. |
 | Q20 | Accept simple config/resume rules; document use in the cheatsheet. | One TOML config per experiment, named presets, and explicit CLI overrides. Resume restores model/rules/learning settings. Runtime limits, device, workers, and game concurrency may change. New model shapes or rules need a new run. |
 | Q21 | Accept staged checks and a speed report. | Short tests check correctness, model agreement, updates, resume, and speed. A long user-run comparison is needed to measure strength gained per training hour. |
-
-## What remains requested
-
-1. Use C++ to use the hardware well, especially for self-play board generation.
-2. Separate CPU work, GPU work, and file I/O when choosing what to change.
-3. Refactor configs so experiments are easy to set up and change.
-4. Organize the README and cheatsheet.
-5. Use an interview to settle the requirements before code changes.
-6. Support deeper/wider models through config, with C++ inference.
-7. Support safe resume without a finished self-play game archive.
-
-The user removed the repeat-experiment goal. Config work and safe resume remain required.
-
-## Checked baseline before migration
-
-- CPU: multicore desktop CPU; exact model and core counts omitted.
-- RAM: exact capacity omitted.
-- GPU: CUDA-capable GPU; exact model and memory capacity omitted.
-- One Python game implementation supports square boards and one-/two-stone turns. See [`engine/game.py`](../engine/game.py).
-- C++ already builds batched features, counts lines, selects PUCT edges, walks trees, and updates search statistics. See [`engine/native.cpp`](../engine/native.cpp).
-- Native search still copies and plays new leaf boards in Python. It also expands their legal actions there. See [`engine/search.py`](../engine/search.py).
-- TSS discovery and independent proof checking remain in Python. Proofs guide moves. Games still reach real terminal results.
-- PyTorch already uses compiled CPU/CUDA math. C++ model calls can reduce Python costs, but they do not promise faster GPU math.
-- `--parallel` means game roots in a batch. It does not mean CPU worker threads.
-- Search, learner updates, evaluation, and saves run in sequence.
-- Disk accounting already uses a cache under the run lock. Atomic writes, disk caps, and recovery checks exist.
-- Settings are split between CLI flags and code constants. There is no experiment-config file interface.
-- This checkout has no saved training games or weights.
-
-The [performance report](training-performance.md), [diagram](project-architecture.html), and ADR contain stale code descriptions. Their old timings are not results for this migration.
 
 ## Decision tree
 
@@ -127,7 +95,6 @@ Removing the repeat-experiment goal does not remove these safety checks.
 ## Related docs
 
 - [README](../README.md) and [cheatsheet](cheatsheet.md).
-- [Earlier requirements](alignment.md).
 - [Earlier native-search decision](adr/0001-python-reference-and-native-search.md).
 - [Domain glossary](../CONTEXT.md).
 - [PyTorch C++ research](pytorch-cpp.md).

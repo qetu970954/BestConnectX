@@ -2,6 +2,8 @@
 
 [繁體中文](migration-validation.zh-TW.md)
 
+The migration measurements below were recorded on 2026-10-04, before the model-variant and housekeeping updates. They are not fresh timings for every later revision. [Model-variant results](model-options.md) are recorded separately.
+
 ## Machine and method
 
 Windows desktop with a multicore CPU and a CUDA-capable GPU; PyTorch 2.11.0+cu128; installed MSVC x64 tools. Exact hardware specifications are omitted for privacy, so the timings below are illustrative rather than hardware-reproducible.
@@ -48,7 +50,7 @@ An early native profile found unnecessary allocation while scanning non-threaten
 - Atomic-save/disk-cap/run-lock checks; frozen 100-game gates, promotion, code/checksum changes, and restart archival checks.
 - Chrome checks: 15×15/13×13/19×19 boards; whole bot turns; charts; keyboard; mobile; local token protection; no browser training controls; no JavaScript errors.
 
-All **68 unit tests passed** (27.516 seconds). The unit suite is CPU-only. Browser checks passed using temporary CPU runs. No persistent training experiment was started. Passing tests is not proof that no bugs remain.
+The migration-stage suite passed **68 unit tests** (27.516 seconds). The unit suite is CPU-only. Browser checks passed using temporary CPU runs. No persistent training experiment was started. Passing tests is not proof that no bugs remain.
 
 During CUDA learning checks, reported PyTorch peak allocation was about 139.2 MiB for Gomoku and 205.6 MiB for Connect6. These are process peaks, not isolated per-model memory or total VRAM use. They exclude CUDA context/driver and memory outside the PyTorch allocator. They do not establish that every allowed model/batch fits memory.
 
@@ -57,6 +59,14 @@ During CUDA learning checks, reported PyTorch peak allocation was about 139.2 Mi
 The temporary GPU check processes used **about 104 seconds total**, including startup and warmup, within the approved five-minute cap. CPU checks, native builds, and CPU browser checks do not use that GPU cap. All repeated checks are included in the total. The final search measurements above ran separately from the unit/browser checks. Temporary run directories were removed.
 
 Warm search timings do not include the build time. The native build succeeded with the installed compiler. One first-load attempt was briefly blocked by Windows application control after a build; later loads and all checks passed. No security setting was disabled.
+
+## Housekeeping checks on 2026-10-04
+
+After removing the retired half-native forest, three Python-engine benchmarks, and superseded reports, the native build succeeded and **all 72 CPU tests passed in 28.379 seconds**. The search comparison now checks the production C++ engine against independent Python selection/backups, rather than comparing the retired bridge with its fallback. Tests also check the shipped machine defaults. The CPU-only Chrome smoke check passed for 15×15 Gomoku, 13×13 and 19×19 Connect6, saved best/latest selection, complete turns, responsive layout, keyboard controls, CSRF protection, and run locking.
+
+All three architectures passed additional CPU learner/native agreement, complete-game checks on 3×3, 15×15, and 19×19, and temporary tic-tac-toe learning/resume checks. Each benchmark used two roots, four simulations, and one warm repeat; these small checks do not establish new speed or strength rankings. Raw records are `.native-cache/housekeeping-{residual,pooled,attention}-cpu.json`. No new CUDA benchmark or persistent training was run. Existing data and session files were not cleaned or migrated.
+
+Source changes invalidate an unfinished gate's code checksum. Use `--restart-gate` only if resume reports a pending-gate code change; this archives the previous comparison rather than mixing results. Ordinary checkpoints and model weights are retained.
 
 ## Run the checks
 

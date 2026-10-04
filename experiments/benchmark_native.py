@@ -15,15 +15,16 @@ from engine.network import Network, device_for
 from engine.runtime import Game, model_for, opening, search, selfplay_batch
 from engine.search import search as python_search
 from engine.cli import main as cli
+from engine.config import ARCHITECTURES
 from engine.training import load_state
 
 
-def measure(device, repeats, batch, simulations, training_presets):
+def measure(device, repeats, batch, simulations, training_presets, architecture='residual'):
     torch.manual_seed(5070)
     results = []
     for rules in (Rules(3, 3, 3), Rules(15, 15, 5), Rules(19, 19, 6, 2, 1)):
         channels, blocks = (8, 1) if rules.height == 3 else (64, 6)
-        net = Network(channels, blocks, rules.height).to(device).eval()
+        net = Network(channels, blocks, rules.height, architecture=architecture).to(device).eval()
         native = model_for(net)
         games = [opening(i, 5070, rules) for i in range(batch)]
         reference = [Reference.from_moves(game.moves, rules=rules) for game in games]
@@ -68,7 +69,7 @@ def measure(device, repeats, batch, simulations, training_presets):
     for preset in training_presets:
         with tempfile.TemporaryDirectory() as directory:
             cli(['train', '--preset', preset, '--data', directory, '--device', str(device),
-                 '--max-games', '8', '--hours', '.01', '--tactical-ms', '0'])
+                 '--max-games', '8', '--hours', '.01', '--tactical-ms', '0', '--architecture', architecture])
             first = load_state(Path(directory)/'latest.pt')
             assert first['games'] == 8 and first['step'] == 32 and first['optimizer']['state']
             restored = Network(**first['config']).to(device).eval()
@@ -96,6 +97,7 @@ def measure(device, repeats, batch, simulations, training_presets):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
+    parser.add_argument('--architecture', choices=ARCHITECTURES, default='residual')
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--batch', type=int, default=8)
     parser.add_argument('--simulations', type=int, default=16)
@@ -117,7 +119,7 @@ def main():
         finally:
             print(f'Check process wall time, including startup/warmup: {time.perf_counter()-began:.3f}s', flush=True)
         return
-    result = measure(device_for(args.device), args.repeats, args.batch, args.simulations, training_presets)
+    result = measure(device_for(args.device), args.repeats, args.batch, args.simulations, training_presets, args.architecture)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, allow_nan=False)+'\n', encoding='utf-8')
     print(f'Checks saved to {args.output}', flush=True)

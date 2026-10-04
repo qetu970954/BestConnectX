@@ -37,7 +37,7 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _replay_window(root, state):
+def _replay_window(state):
     """Replay is checkpoint-owned; never rebuild it by scanning game archives."""
     return state.get('replay', [])[-state['settings'].get('replay_limit', 20_000):]
 
@@ -51,7 +51,7 @@ def load_state(path, rules=None, *, restore_replay=True):
             or (rules is not None and rules != recorded)):
         raise ValueError("Checkpoint rules do not match this run. Use a separate --data directory.")
     if restore_replay and "replay" not in state and "active" in state:
-        state["replay"] = _replay_window(Path(path).parent, state)
+        state["replay"] = _replay_window(state)
     return state
 
 
@@ -84,7 +84,7 @@ def _source():
     return payloads, sha
 
 
-def _environment(root, cap):
+def _environment():
     native_backend()  # Refuse a production run without the native engine.
     _, sha = _source()
     return {'python': sys.version, 'platform': platform.platform(), 'torch': str(torch.__version__),
@@ -101,7 +101,7 @@ def _immutable_json(root, name, value, cap):
         save_json(path, value, root=root, cap=cap)
 
 
-def _flush_exports(root, games, metrics, rules, cap):
+def _flush_exports(root, games, metrics, cap):
     # Checkpoint first. Summary/metric writes can be retried after an interrupted save.
     save_json(root / 'selfplay-stats.json', {'window': 1000, 'summaries': games[-1000:]}, root=root, cap=cap)
     if metrics:
@@ -326,7 +326,7 @@ def _train(args, root, rules):
         settings["gate_seconds"] = args.seconds
     elif restart:
         settings["gate_seconds"] = .25
-    environment = _environment(root, cap)
+    environment = _environment()
     if restart:
         if not gate:
             raise ValueError("No pending gate to restart. Omit --restart-gate for normal resume.")
@@ -338,7 +338,8 @@ def _train(args, root, rules):
     device = device_for(args.device)
     torch.manual_seed(settings["seed"])
     rng = np.random.default_rng(settings["seed"])
-    config = saved['config'] if saved else {'size': rules.height, 'channels': getattr(args, 'channels', 64), 'blocks': getattr(args, 'blocks', 6)}
+    config = saved['config'] if saved else {'size': rules.height, 'channels': getattr(args, 'channels', 64),
+        'blocks': getattr(args, 'blocks', 6), 'architecture': getattr(args, 'architecture', 'residual')}
     net = Network(**config).to(device)
     optimizer = torch.optim.AdamW(net.parameters(), lr=settings.get('learning_rate', .001), weight_decay=.0001)
     games = steps = since_update = last_milestone = 0
@@ -355,13 +356,13 @@ def _train(args, root, rules):
         if device.type == "cuda" and saved.get("cuda_rng") is not None:
             torch.cuda.set_rng_state_all(saved["cuda_rng"])
         games, steps, since_update = saved["games"], saved["step"], saved["since_update"]
-        replay = saved["replay"] if "replay" in saved else _replay_window(root, saved)
+        replay = saved["replay"] if "replay" in saved else _replay_window(saved)
         active = saved["active"]
         last_milestone, gate = saved["last_milestone"], saved["gate"]
         summaries, pending_metrics = saved.get('summaries', []), saved['pending_metrics']
         loss_metrics = saved['loss_metrics']
         timings.update(saved.get('timings', {}))
-        _flush_exports(root, summaries, pending_metrics, rules, cap)
+        _flush_exports(root, summaries, pending_metrics, cap)
     boards = [Game.from_moves(row["moves"], rules=rules) for row in active]
     if not run_info or run_info.get("settings") != settings:
         save_json(root / "run.json", {"rules": rules.id, "rule_config": rules.to_dict(),
@@ -391,7 +392,7 @@ def _train(args, root, rules):
             environment=environment, rng=rng.bit_generator.state,
             torch_rng=torch.get_rng_state(), cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else None)
         save_checkpoint(root / "latest.pt", state, cap, root=root)
-        _flush_exports(root, summaries, pending_metrics, rules, cap)
+        _flush_exports(root, summaries, pending_metrics, cap)
         timings['checkpoint_seconds'] += time.perf_counter() - begin
 
     def status(phase, message="Training is CLI-controlled."):

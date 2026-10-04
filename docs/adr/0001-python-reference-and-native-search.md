@@ -2,36 +2,12 @@
 status: superseded
 ---
 
-# 歷史決策：先建立 Python 參考實作，再移植原生搜尋核心
+# Python correctness references before native playing
 
-> 語言／預設／儲存範圍已由[核准移植共識](../migration-requirements.zh-TW.md)取代；正確性、證明完整性及每訓練小時棋力目標仍保留。現行實作見[原生指南](../native-engine.zh-TW.md)。
+[繁體中文](0001-python-reference-and-native-search.zh-TW.md)
 
-使用者已確認以下四點。目標是在既有 支援 CUDA 的 GPU 上提高固定訓練時間內的棋力增益，而非單純提高每秒棋局數。先用 Python 建立可驗證的多回合 TSS 與完整整合，再根據效能分析移植 CPU 密集部分；不必等神經網路練強才開始移植。
+The original decision was to implement bounded Python threat-space search and an independent proof verifier before moving measured CPU bottlenecks into native code. Keeping a readable reference made it possible to check the native implementation without weakening legal-move, counterwin, or complete-defense requirements. The goal was playing strength per training hour, not throughput alone.
 
-## 本階段範圍
+The [approved migration agreement](../migration-requirements.md) supersedes that partial-port plan: production playing and inference now use C++, while Python/PyTorch owns learning and experiment management. Python game, search, tactics, and proof references remain test oracles, not a production fallback. The retired half-native forest and its benchmarks have been removed.
 
-- 完成有時間、深度與搜尋工作量上限的 Python 多回合威脅空間搜尋（TSS）。
-- 提供不依賴攻方候選排序的獨立證明驗證器、正確性測試與可重現效能基準。
-- 接入自我對弈訓練與候選 AI 對戰，而非只交付獨立解題工具。
-- 保留目前正式對手；候選版本必須通過既有升級評估才可取代它。
-- 本階段不實作 RZOP／DBS。
-
-## 語言分工與移植時機
-
-Python 保留訓練流程、PyTorch、資料管理與使用者介面。棋盤運算、TSS、搜尋及自我對弈的 CPU 密集部分，是 Rust 或 C++ 原生實作的移植對象；具體順序由效能分析決定，不預設整套重寫，也不預先建立複雜的跨語言架構。
-
-Python 版本通過正確性測試、完成上述整合並量出瓶頸後，即進入原生移植階段。原決議未預先選擇 Rust 或 C++。保留 Python 版本作為原生實作的正確性參考；原生實作必須通過對照測試，不能以加速為由改變棋規或降低證明要求。
-
-2026-10-04 實作更新：已依量測結果加入原創 C++17 特徵／連線計數與 PUCT 選擇核心，使用 stdlib ctypes 載入；缺少本機編譯產物時回到 Python。樹遍歷、展開、回傳更新、TSS 與獨立驗證仍是 Python，尚未完成整套原生搜尋。固定模擬數的搜尋策略已通過原生／Python 對照測試；完整訓練吞吐量與棋力增益仍待量測。詳見 [效能報告](../training-performance.md)。
-
-## 正確性與效能取捨
-
-攻方可以限制候選與搜尋深度，但宣告必勝時，不可省略可能推翻結論的防守回應。尤其對手只需一顆棋防守時，另一顆棋的合法用途不能直接忽略；也必須排除對手先獲勝的可能。
-
-搜尋或證明驗證未完成，一律視為「未知」，回到既有搜尋流程；找不到勝局證明不等於必敗。未知結果不得產生確定勝負的訓練標籤。
-
-效能評估同時衡量資料吞吐量與固定時間下的棋力。相同搜尋品質下的加速是收益；藉由減少搜尋而增加棋局數，不能直接視為訓練改善。所選戰術局面的微型效能測試，也不能取代整體訓練與棋力評估。
-
-## 既有約束仍有效
-
-沿用 [需求對齊文件](../alignment.md) 的原創棋類程式碼、自行訓練權重、運算預算、停止／續訓、儲存上限及升級評估要求。這份決議不授權超出既有預算的長時間實驗；當時的決議本身不代表 TSS 已完成。實作進度與驗證結果見 [Python TSS notes](../tss-python.md)。
+Current design: [native engine](../native-engine.md) and [shared model experiments](0002-shared-board-model-experiments.md). The original detailed decision and pre-migration reports remain in Git history.

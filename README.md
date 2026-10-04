@@ -6,6 +6,8 @@ A local, from-scratch connection-game bot. **C++ runs playing and model inferenc
 
 Default: **15×15 freestyle Gomoku**, with **64 channels and 6 residual blocks**. A residual block adds its input to its learned result. Width and depth can change through config. No trained bot weights are shipped.
 
+Optional `pooled` and `attention` models are available for both Gomoku and Connect6. They keep all eight game features, native inference, and safe resume. See [model presets and checks](docs/model-options.md) and the [architecture decision](docs/adr/0002-shared-board-model-experiments.md).
+
 ## Setup
 
 ```sh
@@ -64,7 +66,7 @@ Python: recent training samples → model updates → safe checkpoint and frozen
 C++: updated weights received at safe points → next playing batch
 ```
 
-**PUCT** is tree search guided by model move scores and board values. **TSS** is threat-space search: it looks for forced winning plans. Attack discovery is bounded. Independent checking must cover every reply that can block the attack and rule out an earlier opponent win. An unfinished proof means unknown, not loss. Proofs guide moves; training labels come only from actual terminal results.
+**MCTS** (Monte Carlo tree search) explores future positions and backs up their values. **PUCT** is its branch-selection rule: it balances estimated value, model move priors, and visit counts. **TSS** is threat-space search: it looks for forced winning plans. Attack discovery is bounded. Independent checking must cover every reply that can block the attack and rule out an earlier opponent win. An unfinished proof means unknown, not loss. Proofs guide moves; training labels come only from actual terminal results.
 
 - C++ inference uses FP32. CUDA learning uses BF16; CPU learning uses FP32.
 - Model updates and generation alternate. Weights do not change during a search batch.
@@ -101,4 +103,4 @@ uv run python -m experiments.benchmark_native --device cpu --output .native-cach
 
 Browser checks use installed Chrome, CPU, and temporary runs. No browser is downloaded. The [validation report](docs/migration-validation.md) records staged checks and paired search timings. Short tests do **not** establish improved playing strength per training hour.
 
-Current needs: [approved agreement](docs/migration-requirements.md). Model designs: [survey](docs/model-options.md). [Terms](CONTEXT.md) define the game's shared language. Old reports and the old HTML diagram are marked historical; they are not the current design or current speed results.
+Current requirements: [approved agreement](docs/migration-requirements.md). Model designs: [survey](docs/model-options.md). [Terms](CONTEXT.md) define the game's shared language. Superseded Python-engine reports and benchmarks have been removed; independent Python references remain for correctness tests.

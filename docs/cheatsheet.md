@@ -16,6 +16,8 @@ Windows needs installed MSVC x64 C++ build tools. The build uses the matching Py
 
 ## Default: 15×15 Gomoku
 
+The shipped settings target this Windows machine: **multicore desktop CPU, system RAM, CUDA-capable GPU**. `device = "auto"` selects CUDA here. The tested starting values are 6 native workers, 64 concurrent games, batch 128, and a residual 64-channel / 6-block model. The replay window is 20,000 positions and the disk cap is 20 GiB. These are practical defaults, not proven optimal settings; attention remains a separate experiment. For small CPU-only checks, use `--device cpu --workers 1`.
+
 ```sh
 # Start or resume; two-hour limit, 20 GiB cap
 uv run python train.py
@@ -39,14 +41,22 @@ Ctrl+C also requests a safe save. Wait for the saved message before closing. The
 | `gomoku-small` | Same Gomoku rules | 32 / 2 |
 | `gomoku-large` | Same Gomoku rules | 128 / 10 |
 | `connect6` | 19×19, connect 6; one opening stone, then two per turn | 64 / 6 |
+| `gomoku-pooled`, `gomoku-attention` | Gomoku with an experimental model | 64 / 6 |
+| `connect6-pooled`, `connect6-attention` | Connect6 with an experimental model | 64 / 6 |
 
 ```sh
 uv run python train.py --preset gomoku-large --data data/large
 uv run python train.py --preset connect6
 uv run python dashboard.py --preset connect6 --open-browser
+
+# Experimental pooled value / one attention block: use separate runs
+uv run python train.py --preset gomoku-attention --data data/gomoku-attention
+uv run python train.py --preset connect6-attention --data data/connect6-attention
 ```
 
 Different model sizes on the same rules share the default rule directory. **Use `--data` for a separate model-size experiment.** A win ends play at once, even midway through a two-stone turn.
+
+Architectures are `residual` (default), `pooled` (global value head), and `attention` (pooled value plus one four-head block). Attention needs channels divisible by four. New architecture means a new run; resume restores its saved choice. See [model details and checks](model-options.md) and the [ADR](adr/0002-shared-board-model-experiments.md).
 
 ## Simple config
 
@@ -67,6 +77,16 @@ uv run python train.py --channels 96 --blocks 8 --data data/model-96
 
 For your own file and added preset, use `--config FILE --preset my-model`. Explicit CLI flags override the file for new runs. Unknown keys/types are rejected. Square board flags remain available, for example `--board-size "15*15" --connect 5`.
 
+## Learning rate
+
+For a **new** run, set TOML `learning_rate` or use:
+
+```sh
+uv run python train.py --data data/gomoku-lr3e4 --learning-rate 0.0003
+```
+
+The default is constant-rate AdamW at `0.001`. Resume restores the saved rate even if `--learning-rate` is passed; editing the config does not change it. There is no automatic schedule or supported rate override on resume. `0.0003` is an example, not a measured best value. See [learning rates and current methods](learning-rates.md).
+
 ## Resume and useful limits
 
 ```sh
@@ -81,8 +101,10 @@ uv run python dashboard.py --data data/large --port 8766 --open-browser
 | `--workers 6` | Native CPU workers, not concurrent games |
 | `--parallel 64` | Concurrent self-play games, not optimizer batch size |
 | `--batch 128` | Learning minibatch |
+| `--learning-rate 0.001` | Base AdamW rate for a new run; saved on resume |
 | `--simulations 64` | Search simulations per placement |
 | `--channels 64 --blocks 6` | Model width and residual depth |
+| `--architecture attention` | Experimental pooled value plus one attention block; default `residual` |
 | `--replay-limit 20000` | Recent training-sample bound |
 | `--max-games 1000` | Stop at this **total** game count, not 1,000 extra games |
 | `--seconds 0.25` | Gate limit per full turn, not per stone |

@@ -1,4 +1,4 @@
-"""Differential checks for the optional original C++ kernels."""
+"""Differential checks for CPU kernels and the production C++ search."""
 import unittest
 from unittest.mock import patch
 import numpy as np
@@ -7,6 +7,7 @@ from engine import native
 from engine.game import Game, Rules, batch_features
 from engine.network import Network
 from engine.search import search
+from engine.runtime import search as native_search
 from engine.training import opening
 from tests.test_performance import completions
 
@@ -74,7 +75,7 @@ class NativeTests(unittest.TestCase):
             native.features(np.zeros((1, 4), dtype=np.int8), np.ones(1, dtype=np.int32),
                             np.ones(1, dtype=np.int32), np.array([[0, 4]], dtype=np.int32), 1)
 
-    def test_native_search_uses_bulk_traversal_not_scalar_ctypes_calls(self):
+    def test_reference_search_uses_independent_python_selection(self):
         class Uniform:
             def evaluate(self, games):
                 return (np.zeros((len(games), games[0].board.size), dtype=np.float32),
@@ -93,12 +94,11 @@ class NativeTests(unittest.TestCase):
         torch.manual_seed(5070)
         for rules in (Rules(), Rules(15, 15, 5), Rules(19, 19, 6, 2, 1)):
             network = Network(size=rules.height, channels=8, blocks=1)
-            def run():
-                return search([opening(i, 123456, rules) for i in range(8)], network,
-                              simulations=32, rng=np.random.default_rng(5070))
-            actual, count = run()
+            games = [opening(i, 123456, rules) for i in range(8)]
+            references = [Game.from_moves(game.moves, rules=rules) for game in games]
+            actual, count = native_search(games, network, simulations=32, workers=2)
             with patch('engine.native.library', return_value=None):
-                expected, expected_count = run()
+                expected, expected_count = search(references, network, simulations=32)
             self.assertEqual(count, expected_count)
             np.testing.assert_array_equal(actual, expected)
 

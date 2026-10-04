@@ -23,7 +23,7 @@ def library_path():
 
 @lru_cache(maxsize=1)
 def library():
-    if os.environ.get('BESTCONNECTX_NATIVE', os.environ.get('BESTCONNECT6_NATIVE')) == '0':
+    if os.environ.get('BESTCONNECTX_NATIVE') == '0':
         return None
     path = library_path()
     if not path.exists():
@@ -44,21 +44,6 @@ def library():
         array(dtype=np.int32, ndim=1, flags='C_CONTIGUOUS'),
         array(dtype=np.float64, ndim=1, flags='C_CONTIGUOUS'), ctypes.c_int]
     backend.puct_select.restype = ctypes.c_int
-    integers = array(dtype=np.int32, ndim=1, flags='C_CONTIGUOUS')
-    doubles = array(dtype=np.float64, ndim=1, flags='C_CONTIGUOUS')
-    backend.tree_create.argtypes = [integers, ctypes.c_int]
-    backend.tree_create.restype = ctypes.c_void_p
-    backend.tree_destroy.argtypes = [ctypes.c_void_p]
-    backend.tree_destroy.restype = None
-    backend.tree_advance.argtypes = [ctypes.c_void_p, integers, integers, integers]
-    backend.tree_advance.restype = ctypes.c_int
-    backend.tree_commit.argtypes = [ctypes.c_void_p, integers, integers, integers,
-        array(dtype=np.uint8, ndim=1, flags='C_CONTIGUOUS'), integers, integers,
-        doubles, doubles, ctypes.c_int, ctypes.c_int]
-    backend.tree_commit.restype = ctypes.c_int
-    backend.tree_policy.argtypes = [ctypes.c_void_p, integers,
-        array(dtype=np.float32, ndim=1, flags='C_CONTIGUOUS')]
-    backend.tree_policy.restype = ctypes.c_int
     return backend
 
 
@@ -89,59 +74,6 @@ def select(prior, visits, total):
     if index < 0:
         raise ValueError('PUCT needs at least one action.')
     return index
-
-
-class Tree:
-    """Own one native search forest; never retain ctypes pointers to Python arrays."""
-    def __init__(self, games):
-        self.backend = library()
-        self.count = len(games)
-        self.offsets = np.array([0, *np.cumsum([game.board.size for game in games])], dtype=np.int32)
-        players = np.array([game.player for game in games], dtype=np.int32)
-        if not self.count or np.any((players != 1) & (players != -1)):
-            raise ValueError('Native search needs live players.')
-        self.leaves = np.empty(self.count, dtype=np.int32)
-        self.parents = np.empty(self.count, dtype=np.int32)
-        self.actions = np.empty(self.count, dtype=np.int32)
-        self.handle = self.backend.tree_create(players, self.count)
-        if not self.handle:
-            raise MemoryError('Could not allocate native search tree.')
-
-    @staticmethod
-    def check(code):
-        if code == -2:
-            raise MemoryError('Native search allocation failed.')
-        if code < 0:
-            raise ValueError('Invalid native search state or dimensions.')
-
-    def advance(self):
-        self.check(self.backend.tree_advance(self.handle, self.leaves, self.parents, self.actions))
-        return self.leaves, self.parents, self.actions
-
-    def commit(self, ids, games, actions, priors, values):
-        count = len(ids)
-        if not (count == len(games) == len(actions) == len(priors) == len(values)):
-            raise ValueError('Native leaf metadata must match the batch.')
-        if any(len(a) != len(p) for a, p in zip(actions, priors)):
-            raise ValueError('Native action and prior lengths must match.')
-        offsets = np.array([0, *np.cumsum([len(a) for a in actions])], dtype=np.int32)
-        self.check(self.backend.tree_commit(self.handle, np.asarray(ids, dtype=np.int32),
-            np.array([game.player for game in games], dtype=np.int32),
-            np.array([game.winner for game in games], dtype=np.int32),
-            np.array([game.done for game in games], dtype=np.uint8), offsets,
-            np.ascontiguousarray(np.concatenate(actions), dtype=np.int32),
-            np.ascontiguousarray(np.concatenate(priors), dtype=np.float64),
-            np.ascontiguousarray(values, dtype=np.float64), count, int(offsets[-1])))
-
-    def policies(self):
-        output = np.empty(int(self.offsets[-1]), dtype=np.float32)
-        self.check(self.backend.tree_policy(self.handle, self.offsets, output))
-        return [output[self.offsets[i]:self.offsets[i + 1]] for i in range(self.count)]
-
-    def close(self):
-        if self.handle:
-            self.backend.tree_destroy(self.handle)
-            self.handle = None
 
 
 def build():

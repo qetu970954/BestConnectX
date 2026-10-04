@@ -7,7 +7,7 @@ import sys
 from .storage import busy, load_json
 from .game import Rules, parse_board
 from .runtime import DEFAULT_RULES
-from .config import DEFAULT_CONFIG, load_options
+from .config import ARCHITECTURES, DEFAULT_CONFIG, load_options
 
 
 def add_rules(parser):
@@ -34,8 +34,9 @@ def resolve_rules(args):
         explicit = getattr(args, 'explicit', set())
         if explicit & {'connect', 'board_size', 'stones_per_turn', 'starter_stones'} and requested != args.rules:
             raise ValueError('Changing rules requires a new --data directory.')
-        config = recorded.get('network', {})
-        if any(key in explicit and config.get(key, getattr(args, key)) != getattr(args, key) for key in ('channels', 'blocks')):
+        config = {'architecture': 'residual', **recorded.get('network', {})}
+        if any(key in explicit and config.get(key, getattr(args, key)) != getattr(args, key)
+               for key in ('channels', 'blocks', 'architecture')):
             raise ValueError('Changing model shape requires a new --data directory.')
     else:
         args.rules = requested
@@ -74,6 +75,8 @@ def main(argv=None):
     training.add_argument('--max-games', type=int, default=0, help='Stop at this total completed-game count; 0 means time limit only')
     training.add_argument('--channels', type=int, default=64)
     training.add_argument('--blocks', type=int, default=6)
+    training.add_argument('--architecture', choices=ARCHITECTURES, default='residual',
+                          help='New-run model: residual baseline, pooled value, or pooled value plus board attention')
     training.add_argument('--workers', type=int, default=None, help='Native CPU threads; explicit values also apply on resume')
     training.add_argument('--learning-rate', type=float, default=.001)
     training.add_argument('--replay-limit', type=int, default=20_000)
@@ -125,6 +128,8 @@ def main(argv=None):
                     or not 2 <= args.batch <= 4096 or not 0 <= args.seed < 2**32
                     or args.max_games < 0 or args.snapshot_every < 1
                     or not 4 <= args.channels <= 256 or not 0 <= args.blocks <= 32
+                    or args.architecture not in ARCHITECTURES
+                    or (args.architecture == 'attention' and args.channels % 4)
                     or (args.workers is not None and not 1 <= args.workers <= 12)
                     or not 1 <= args.replay_limit <= 200_000 or not 0 <= args.bootstrap_games <= 10_000
                     or not 1 <= args.updates_per_cycle <= 10_000

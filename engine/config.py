@@ -4,14 +4,15 @@ from pathlib import Path
 import tomllib
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / 'configs/experiments.toml'
+ARCHITECTURES = ('residual', 'pooled', 'attention')
 FIELDS = {'board_size', 'connect', 'stones_per_turn', 'starter_stones', 'channels', 'blocks',
           'workers', 'parallel', 'simulations', 'batch', 'seed', 'learning_rate', 'replay_limit',
           'bootstrap_games', 'updates_per_cycle', 'tactical_ms', 'snapshot_every', 'hours',
-          'disk_gib', 'device', 'seconds', 'data', 'max_games'}
+          'disk_gib', 'device', 'seconds', 'data', 'max_games', 'architecture'}
 INTEGER_FIELDS = {'connect', 'stones_per_turn', 'starter_stones', 'channels', 'blocks', 'workers',
                   'parallel', 'simulations', 'batch', 'seed', 'replay_limit', 'bootstrap_games',
                   'updates_per_cycle', 'snapshot_every', 'max_games'}
-TEXT_FIELDS = {'board_size', 'device', 'data'}
+TEXT_FIELDS = {'board_size', 'device', 'data', 'architecture'}
 
 
 def load_options(argv):

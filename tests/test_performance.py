@@ -88,7 +88,7 @@ class PerformanceTests(unittest.TestCase):
     def test_resume_uses_only_bounded_checkpoint_replay_without_disk_scans(self):
         state = {'settings': {'replay_limit': 5}, 'replay': [10, 20, 30, 40, 50, 60]}
         with patch.object(Path, 'glob', side_effect=AssertionError('Archive scan')):
-            self.assertEqual(_replay_window(Path('unused-run'), state), [20, 30, 40, 50, 60])
+            self.assertEqual(_replay_window(state), [20, 30, 40, 50, 60])
 
     def test_batched_features_match_scalar_features_across_rules_and_cache_edits(self):
         rng = np.random.default_rng(5070)

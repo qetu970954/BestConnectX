@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BestConnectX — how the AI thinks</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap">
+<style>
+* { box-sizing: border-box; }
+:root { --paper:#f5f5f5; --ink:#2d3142; --muted:#4f5d75; --soft:#7a8399; --rule:#bfc0c0; --accent:#eb6c36; --tint:rgba(235,108,54,.08); --sans:'Geist',system-ui,sans-serif; --serif:'Instrument Serif',Georgia,serif; --mono:'Geist Mono',ui-monospace,monospace; }
+body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans); line-height:1.6; }
+main { max-width:1360px; margin:auto; padding:48px 40px; min-width:0; }
+header { max-width:960px; }
+.eyebrow { font:500 11px var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--muted); }
+h1 { font:400 clamp(36px,5vw,56px)/1.08 var(--serif); margin:16px 0; letter-spacing:-.02em; }
+h2 { font:400 32px/1.2 var(--serif); margin:0 0 12px; }
+h3 { font-size:16px; margin:0 0 8px; }
+p { margin:8px 0; }
+.intro { font-size:18px; color:var(--muted); }
+nav { display:flex; flex-wrap:wrap; gap:12px 24px; margin:24px 0 0; }
+a { color:var(--ink); text-underline-offset:4px; }
+a:hover { text-decoration-color:var(--accent); }
+section { margin-top:64px; scroll-margin-top:24px; }
+.section-top { display:flex; align-items:baseline; gap:16px; }
+.number { font:500 12px var(--mono); color:var(--muted); }
+.lead { max-width:900px; color:var(--muted); }
+figure { margin:24px 0; }
+.diagram-container { width:100%; max-width:100%; min-width:0; overflow-x:auto; }
+.diagram-container:focus-visible, a:focus-visible { outline:2px solid var(--muted); outline-offset:4px; }
+svg { width:100%; min-width:1280px; display:block; font-family:var(--sans); }
+svg .node { fill:#fff; stroke:var(--ink); stroke-width:1.2; }
+svg .focal { fill:var(--tint); stroke:var(--accent); }
+svg .optional { fill:rgba(45,49,66,.02); stroke:var(--rule); stroke-dasharray:5 4; }
+svg .mask { fill:var(--paper); }
+svg .arrow { fill:none; stroke:var(--muted); stroke-width:1.6; }
+svg .return { stroke-dasharray:5 4; }
+svg .name { font-size:16px; font-weight:600; fill:var(--ink); text-anchor:middle; }
+svg .body { font-size:12px; font-weight:400; fill:var(--muted); text-anchor:middle; }
+svg .tech { font:400 12px var(--mono); fill:var(--muted); text-anchor:middle; }
+svg .tag { font:500 8px var(--mono); fill:var(--muted); letter-spacing:.1em; }
+svg .chip { fill:var(--paper); stroke:var(--rule); stroke-width:.8; }
+svg .label { font:400 12px var(--mono); fill:var(--muted); text-anchor:middle; letter-spacing:.06em; }
+svg .heading { font-size:14px; font-weight:600; fill:var(--ink); }
+svg .small { font-size:11px; font-weight:400; fill:var(--muted); }
+svg .rule { stroke:var(--rule); stroke-width:.8; }
+figcaption { max-width:1000px; font-size:15px; color:var(--muted); margin-top:12px; }
+.table-scroll { width:100%; overflow-x:auto; }
+table { border-collapse:collapse; width:100%; text-align:left; font-size:15px; }
+caption { text-align:left; font-weight:600; margin-bottom:12px; }
+th,td { border-bottom:1px solid var(--rule); padding:12px 16px 12px 0; vertical-align:top; }
+th { font-weight:600; }
+code { font-family:var(--mono); font-size:.86em; }
+.ideas { display:grid; grid-template-columns:1.25fr 1fr; gap:24px; margin-top:24px; }
+.idea { border-left:2px solid var(--rule); padding-left:20px; }
+.idea p { color:var(--muted); }
+footer { margin-top:56px; border-top:1px solid var(--rule); padding-top:20px; color:var(--muted); font-size:12px; }
+@media (max-width:600px) { main { padding:28px 20px; } section { margin-top:44px; } .ideas { grid-template-columns:1fr; } }
+@media print { main { padding:0; } nav { display:none; } section { break-before:page; } .diagram-container,.table-scroll { overflow-x:visible; } svg { min-width:0; } figure { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="eyebrow">BestConnectX · a visual idea map</p>
+<h1>The model suggests.<br>The search decides.</h1>
+<p class="intro">Predict useful moves, explore their futures, then learn from what actually happened.</p>
+<nav aria-label="Jump to an idea"><a href="#search">PUCT + MCTS</a><a href="#model">Inside the model</a><a href="#moves">Choosing a move</a><a href="#knobs">What the knobs change</a><a href="#learning">Learning loop</a></nav>
+</header>
+
+<section id="search" aria-labelledby="search-heading">
+<div class="section-top"><span class="number">01</span><h2 id="search-heading">PUCT is the steering rule inside MCTS.</h2></div>
+<p class="lead">MCTS builds a tree of possible futures. PUCT chooses which branch deserves the next look: promising moves, but also moves we have not explored enough.</p>
+<figure>
+<div class="diagram-container" tabindex="0" role="region" aria-label="MCTS diagram; scroll horizontally on a narrow screen">
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="how-bot-thinks-mcts-title how-bot-thinks-mcts-desc">
+<title id="how-bot-thinks-mcts-title">PUCT inside Monte Carlo tree search</title>
+<desc id="how-bot-thinks-mcts-desc">PUCT selects a branch, the model or real terminal result supplies its value, and repeated backups produce a visit-based search policy.</desc>
+<defs>
+<marker id="mcts-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f5d75"/></marker>
+<marker id="mcts-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eb6c36"/></marker>
+<marker id="mcts-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#f5f5f5"/>
+<g class="arrow" marker-end="url(#mcts-arrow)">
+<path d="M560 120 V160"/>
+<path d="M720 208 H920"/>
+<path d="M560 256 V296"/>
+<path d="M560 392 V432"/>
+<path d="M1040 256 V464 Q1040 472 1032 472 H720"/>
+<path d="M560 512 V552"/>
+<path d="M680 596 H920"/>
+<path class="return" d="M440 596 H64 Q56 596 56 588 V88 Q56 80 64 80 H400"/>
+</g>
+<rect class="mask" x="800" y="178" width="40" height="20"/><text class="label" x="820" y="193">YES</text>
+<rect class="mask" x="568" y="264" width="36" height="20"/><text class="label" x="586" y="279">NO</text>
+<rect class="mask" x="780" y="566" width="40" height="20"/><text class="label" x="800" y="581">NO</text>
+<rect class="mask" x="224" y="566" width="48" height="20"/><text class="label" x="248" y="581">YES</text>
+<g>
+<rect class="mask" x="400" y="40" width="320" height="80" rx="6"/><rect class="node focal" x="400" y="40" width="320" height="80" rx="6"/>
+<rect class="chip" x="412" y="52" width="48" height="16" rx="2"/><text class="tag" x="422" y="63">PUCT</text>
+<text class="name" x="560" y="88">Select the highest Q + U</text><text class="body" x="560" y="108">Walk down the tree to a leaf</text>
+</g>
+<polygon class="node" points="560,160 720,208 560,256 400,208"/><text class="name" x="560" y="214">Game ended?</text>
+<g>
+<rect class="node" x="920" y="160" width="240" height="96" rx="6"/><rect class="chip" x="932" y="172" width="48" height="16" rx="2"/><text class="tag" x="940" y="183">REAL</text>
+<text class="name" x="1040" y="208">Use the actual result</text><text class="tech" x="1040" y="236">v = winner × player</text>
+</g>
+<g>
+<rect class="node" x="400" y="296" width="320" height="96" rx="6"/><rect class="chip" x="412" y="308" width="48" height="16" rx="2"/><text class="tag" x="424" y="319">MODEL</text>
+<text class="name" x="560" y="344">Evaluate and expand</text><text class="tech" x="560" y="372">new priors P · leaf value v</text>
+</g>
+<g>
+<rect class="node" x="400" y="432" width="320" height="80" rx="6"/><rect class="chip" x="412" y="444" width="56" height="16" rx="2"/><text class="tag" x="420" y="455">BACKUP</text>
+<text class="name" x="560" y="480">Update visits N and mean value Q</text><text class="body" x="560" y="500">Flip the sign only when the player changes</text>
+</g>
+<polygon class="node" points="560,552 680,596 560,640 440,596"/><text class="name" x="560" y="602">More budget?</text>
+<rect class="node" x="920" y="552" width="240" height="88" rx="20"/><text class="name" x="1040" y="588">Search policy π</text><text class="tech" x="1040" y="616">π(a) = N(a) / ΣN</text>
+<!-- A worked example, not additional search nodes. -->
+<text class="heading" x="80" y="184">Known value + exploration</text>
+<text class="tech" x="220" y="220">Q + 1.5 P √(1 + ΣN) / (1 + N)</text>
+<text class="small" x="80" y="244">Example: 20 visits so far at this node</text>
+<text class="small" x="92" y="272">Move</text><text class="tech" x="144" y="272">P</text><text class="tech" x="196" y="272">N</text><text class="tech" x="248" y="272">Q</text><text class="tech" x="332" y="272">Q+U</text>
+<line class="rule" x1="80" y1="280" x2="360" y2="280"/>
+<text class="tech" x="104" y="304">A</text><text class="tech" x="144" y="304">.55</text><text class="tech" x="196" y="304">16</text><text class="tech" x="248" y="304">.20</text><text class="tech" x="332" y="304">.422</text>
+<text class="tech" x="104" y="336">B</text><text class="tech" x="144" y="336">.30</text><text class="tech" x="196" y="336">4</text><text class="tech" x="248" y="336">.15</text><text class="tech" x="332" y="336">.562</text>
+<rect x="80" y="344" width="280" height="32" rx="4" fill="rgba(235,108,54,.08)" stroke="#eb6c36"/>
+<text class="tech" x="104" y="368">C</text><text class="tech" x="144" y="368">.15</text><text class="tech" x="196" y="368">0</text><text class="tech" x="248" y="368">0</text><text class="tech" x="332" y="368">1.031</text>
+<text class="heading" x="80" y="408">C gets the next exploration.</text>
+<text class="small" x="80" y="432">Q: average backed-up result; 0 if unvisited.</text>
+<text class="small" x="80" y="452">P: model prior after masking + softmax.</text>
+<text class="small" x="80" y="472">N: how often that branch was visited.</text>
+<line class="rule" x1="40" y1="660" x2="1240" y2="660"/>
+<text class="small" x="40" y="692">Orange = the key idea</text><text class="small" x="320" y="692">Diamond = decision</text><text class="small" x="600" y="692">Dashed arrow = repeat</text><text class="small" x="880" y="692">Stop on simulation, time, or cancellation limit</text>
+</svg>
+</div>
+<figcaption><strong>Next exploration ≠ final move.</strong> C wins the PUCT example, but if play stopped at those visit counts, A would be chosen. Before the loop, the root is evaluated once to initialize its priors; with no visits, the output falls back to those priors.</figcaption>
+</figure>
+</section>
+
+<section id="model" aria-labelledby="model-heading">
+<div class="section-top"><span class="number">02</span><h2 id="model-heading">One board, two kinds of advice.</h2></div>
+<p class="lead"><strong>Policy:</strong> “Where should we look?” <strong>Value:</strong> “How good is this position for the player to move?” Neither is a proof of a win.</p>
+<figure>
+<div class="diagram-container" tabindex="0" role="region" aria-label="Model architecture; scroll horizontally on a narrow screen">
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="how-bot-thinks-model-title how-bot-thinks-model-desc">
+<title id="how-bot-thinks-model-title">Policy and value model architecture</title>
+<desc id="how-bot-thinks-model-desc">Eight board planes pass through a convolutional stem, residual blocks and optional attention before splitting into policy scores and a position value.</desc>
+<defs>
+<marker id="model-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f5d75"/></marker>
+<marker id="model-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eb6c36"/></marker>
+<marker id="model-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#f5f5f5"/>
+<text class="heading" x="40" y="72">Default example: 15×15 board · C = 64 channels · B = 6 residual blocks</text>
+<g class="arrow" marker-end="url(#model-arrow)">
+<path d="M280 212 H320"/><path d="M520 212 H560"/><path d="M800 212 H840"/>
+<path d="M920 292 V360 Q920 368 912 368 H688 Q680 368 680 376 V448"/>
+<path d="M1000 292 V400 Q1000 408 1008 408 H1072 Q1080 408 1080 416 V448"/>
+</g>
+<g>
+<rect class="node" x="40" y="132" width="240" height="160" rx="6"/><rect class="chip" x="52" y="144" width="48" height="16" rx="2"/><text class="tag" x="62" y="155">INPUT</text>
+<text class="name" x="160" y="192">Board as eight planes</text><text class="body" x="160" y="220">Stones, turn state, threats</text><text class="tech" x="160" y="260">8 × 15 × 15</text>
+</g>
+<g>
+<rect class="node" x="320" y="132" width="200" height="160" rx="6"/><rect class="chip" x="332" y="144" width="48" height="16" rx="2"/><text class="tag" x="344" y="155">STEM</text>
+<text class="name" x="420" y="192">3×3 convolution</text><text class="body" x="420" y="220">BatchNorm + ReLU</text><text class="tech" x="420" y="260">64 × 15 × 15</text>
+</g>
+<g>
+<rect class="node" x="560" y="132" width="240" height="160" rx="6"/><rect class="chip" x="572" y="144" width="48" height="16" rx="2"/><text class="tag" x="584" y="155">BODY</text>
+<text class="name" x="680" y="192">6 residual blocks</text><text class="body" x="680" y="220">Each: two 3×3 convs + skip</text><text class="tech" x="680" y="260">64 × 15 × 15</text>
+</g>
+<g>
+<rect class="mask" x="840" y="132" width="240" height="160" rx="6"/><rect class="node optional" x="840" y="132" width="240" height="160" rx="6"/><rect class="chip" x="852" y="144" width="64" height="16" rx="2"/><text class="tag" x="862" y="155">OPTIONAL</text>
+<text class="name" x="960" y="192">One attention block</text><text class="body" x="960" y="220">4 heads + relative positions</text><text class="body" x="960" y="244">Skipped for residual / pooled</text><text class="tech" x="960" y="272">64 × 15 × 15</text>
+</g>
+<text class="heading" x="40" y="384">Why eight views?</text>
+<text class="small" x="40" y="412">Your stones / opponent stones</text><text class="small" x="40" y="436">Two placements left? / Black to play?</text>
+<text class="small" x="40" y="460">Your one-stone / two-stone threat cells</text><text class="small" x="40" y="484">Opponent one-stone / two-stone threat cells</text>
+<text class="small" x="40" y="520">Some planes are zero in Gomoku.</text><text class="small" x="40" y="544">Connect6 needs them — keep the same input design.</text>
+<g>
+<rect class="mask" x="520" y="448" width="320" height="160" rx="6"/><rect class="node focal" x="520" y="448" width="320" height="160" rx="6"/><rect class="chip" x="532" y="460" width="64" height="16" rx="2"/><text class="tag" x="546" y="471">POLICY</text>
+<text class="name" x="680" y="504">Where should we look?</text><text class="tech" x="680" y="532">1×1 conv: 64 → 1</text><text class="body" x="680" y="560">225 raw cell scores, not a chosen move</text><text class="body" x="680" y="584">MCTS masks and softmaxes them into P</text>
+</g>
+<g>
+<rect class="mask" x="920" y="448" width="320" height="160" rx="6"/><rect class="node focal" x="920" y="448" width="320" height="160" rx="6"/><rect class="chip" x="932" y="460" width="64" height="16" rx="2"/><text class="tag" x="948" y="471">VALUE</text>
+<text class="name" x="1080" y="504">How good is this position?</text><text class="tech" x="1080" y="532">2-channel conv → 450 → 64 → 1 → tanh</text><text class="body" x="1080" y="560">One expected-result estimate v ∈ [−1, +1]</text><text class="body" x="1080" y="584">Positive favors the current player</text>
+</g>
+<line class="rule" x1="40" y1="660" x2="1240" y2="660"/>
+<text class="small" x="40" y="692">Solid box = shared model stage</text><text class="small" x="400" y="692">Dashed box = attention variant only</text><text class="small" x="840" y="692">Orange = the two outputs</text>
+</svg>
+</div>
+<figcaption>The board stays spatial: there is no downsampling in the body. A residual block learns a correction and adds its input back. The value-head dimensions shown above are the <strong>default residual</strong> version.</figcaption>
+</figure>
+<div class="table-scroll"><table>
+<caption>Three versions of the same idea · 15×15, 64 channels, 6 blocks</caption>
+<thead><tr><th>Version</th><th>What changes?</th><th>Trainable numbers</th></tr></thead>
+<tbody>
+<tr><td><code>residual</code> · default</td><td>Flatten the 2-channel value map; keep board layout.</td><td>477,764</td></tr>
+<tr><td><code>pooled</code></td><td>Value head: 16-channel map → whole-board average → 64 → 1.</td><td>450,898</td></tr>
+<tr><td><code>attention</code></td><td>Pooled value head + one block that lets cells communicate globally.</td><td>487,734</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="moves" aria-labelledby="moves-heading">
+<div class="section-top"><span class="number">03</span><h2 id="moves-heading">The strongest-looking model score is not the move.</h2></div>
+<p class="lead">Check concrete tactics first. Use search when the position is still unresolved.</p>
+<figure>
+<div class="diagram-container" tabindex="0" role="region" aria-label="Move choice; scroll horizontally on a narrow screen">
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="how-bot-thinks-moves-title how-bot-thinks-moves-desc">
+<title id="how-bot-thinks-moves-title">How the bot chooses a placement</title>
+<desc id="how-bot-thinks-moves-desc">Verified tactical moves take priority, simple forced or fallback moves come next, and unresolved positions use neural MCTS visit counts.</desc>
+<defs>
+<marker id="moves-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f5d75"/></marker>
+<marker id="moves-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eb6c36"/></marker>
+<marker id="moves-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#f5f5f5"/>
+<g class="arrow" marker-end="url(#moves-arrow)">
+<path d="M560 104 V144"/><path d="M720 192 H920"/><path d="M560 240 V288"/>
+<path d="M720 336 H920"/><path d="M560 384 V432"/><path d="M560 512 V552"/>
+<path d="M720 596 H920"/>
+<path d="M1160 192 H1192 Q1200 192 1200 200 V576 Q1200 584 1192 584 H1160"/>
+<path d="M1160 336 H1192 a8 8 0 0 1 16 0 H1232 Q1240 336 1240 344 V608 Q1240 616 1232 616 H1160"/>
+</g>
+<rect class="mask" x="800" y="162" width="40" height="20"/><text class="label" x="820" y="177">YES</text>
+<rect class="mask" x="568" y="248" width="36" height="20"/><text class="label" x="586" y="263">NO</text>
+<rect class="mask" x="800" y="306" width="40" height="20"/><text class="label" x="820" y="321">YES</text>
+<rect class="mask" x="568" y="392" width="36" height="20"/><text class="label" x="586" y="407">NO</text>
+<rect class="node" x="440" y="40" width="240" height="64" rx="20"/><text class="name" x="560" y="68">Current board</text><text class="body" x="560" y="88">One placement to choose</text>
+<polygon class="node focal" points="560,144 720,192 560,240 400,192"/><text class="name" x="560" y="198">Verified tactic?</text>
+<g>
+<rect class="node" x="920" y="144" width="240" height="96" rx="6"/><rect class="chip" x="932" y="156" width="48" height="16" rx="2"/><text class="tag" x="942" y="167">PROOF</text>
+<text class="name" x="1040" y="192">Play the checked move</text><text class="body" x="1040" y="220">Win / saved plan / TSS / fork</text>
+</g>
+<polygon class="node" points="560,288 720,336 560,384 400,336"/><text class="name" x="560" y="342">Forced or fallback?</text>
+<g>
+<rect class="node" x="920" y="288" width="240" height="96" rx="6"/><rect class="chip" x="932" y="300" width="48" height="16" rx="2"/><text class="tag" x="940" y="311">SIMPLE</text>
+<text class="name" x="1040" y="336">Use the simple move</text><text class="body" x="1040" y="364">Only option / bootstrap / heuristic</text>
+</g>
+<g>
+<rect class="node" x="400" y="432" width="320" height="80" rx="6"/><rect class="chip" x="412" y="444" width="48" height="16" rx="2"/><text class="tag" x="424" y="455">MCTS</text>
+<text class="name" x="560" y="480">Run neural-guided search</text><text class="body" x="560" y="500">Compare possible futures</text>
+</g>
+<g>
+<rect class="mask" x="400" y="552" width="320" height="88" rx="6"/><rect class="node focal" x="400" y="552" width="320" height="88" rx="6"/><rect class="chip" x="412" y="564" width="56" height="16" rx="2"/><text class="tag" x="420" y="575">CHOOSE</text>
+<text class="name" x="560" y="600">Choose from root visits</text><text class="body" x="560" y="624">Play: most visited · self-play: sample</text>
+</g>
+<rect class="node" x="920" y="552" width="240" height="96" rx="20"/><text class="name" x="1040" y="588">Place one stone</text><text class="body" x="1040" y="612">Update the board</text><text class="body" x="1040" y="632">Repeat if the turn has another stone</text>
+<text class="heading" x="80" y="184">A proof is stronger than a guess.</text>
+<text class="small" x="80" y="216">TSS = threat-space search.</text><text class="small" x="80" y="240">A forced-win plan must be independently checked.</text>
+<text class="small" x="80" y="264">A timeout means unknown — not a loss.</text>
+<text class="heading" x="80" y="432">Exploration is for learning.</text>
+<text class="small" x="80" y="464">Self-play mixes noise into root priors:</text><text class="tech" x="208" y="488">75% P + 25% Dirichlet noise</text>
+<text class="small" x="80" y="512">It samples more freely in the first 12 placements.</text><text class="small" x="80" y="536">Normal play has no root noise and uses argmax.</text>
+<line class="rule" x1="40" y1="660" x2="1240" y2="660"/>
+<text class="small" x="40" y="692">Oval = start / placement</text><text class="small" x="400" y="692">Diamond = decision</text><text class="small" x="800" y="692">Rectangle = action</text>
+</svg>
+</div>
+<figcaption>Search excludes occupied cells and narrows immediate tactical choices before softmax. In Connect6, a turn can have two placements: choose one, update the position, then choose the next. Very short play budgets or no model use the heuristic fallback.</figcaption>
+</figure>
+</section>
+
+<section id="knobs" aria-labelledby="knobs-heading">
+<div class="section-top"><span class="number">04</span><h2 id="knobs-heading">Bigger brain, deeper search, faster pipeline: different knobs.</h2></div>
+<div class="table-scroll"><table>
+<caption>Starting values for this machine — not a claim of optimal strength</caption>
+<thead><tr><th>Knob</th><th>Starting value</th><th>What it actually changes</th></tr></thead>
+<tbody>
+<tr><td><strong>Channels C</strong> · width</td><td>64</td><td>Feature maps per cell. Double C → roughly 4× dense-convolution work, not 2×.</td></tr>
+<tr><td><strong>Residual blocks B</strong> · depth</td><td>6</td><td>More stacked transformations. Double B → roughly 2× body work.</td></tr>
+<tr><td><strong>Board edge</strong> · spatial size</td><td>15</td><td>15×15 → 19×19 means 225 → 361 cells. Full attention compares cell pairs: its pair work grows with the fourth power of the edge.</td></tr>
+<tr><td><strong>Simulations</strong> · search effort</td><td>64 in self-play</td><td>More futures explored per placement. Does not add model layers; live play is also limited by thinking time.</td></tr>
+<tr><td><strong>Workers / parallel games</strong> · throughput</td><td>6 / 64</td><td>CPU threads / independent game roots. Helps feed inference batches, not make a wider neural network.</td></tr>
+<tr><td><strong>Learning batch / learning rate</strong></td><td>128 / 0.001</td><td>Samples per optimizer update / update size. Changes learning and memory use, not the model's shape.</td></tr>
+</tbody></table></div>
+<div class="ideas">
+<div class="idea"><h3>Wider is not automatically stronger.</h3><p>A slower model may get fewer searches in the same thinking time. Compare complete bots at equal time, not just parameter counts.</p></div>
+<div class="idea"><h3>Attention sees farther — at a price.</h3><p>Convolutions build local patterns; attention connects distant cells directly. Its strength benefit is still an experiment here.</p></div>
+</div>
+</section>
+
+<section id="learning" aria-labelledby="learning-heading">
+<div class="section-top"><span class="number">05</span><h2 id="learning-heading">Learn the search's advice and the game's real result.</h2></div>
+<p class="lead">The model learns numbers, not new game rules. Generate games and update weights in alternating phases.</p>
+<figure>
+<div class="diagram-container" tabindex="0" role="region" aria-label="Self-play learning loop; scroll horizontally on a narrow screen">
+<svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="how-bot-thinks-learning-title how-bot-thinks-learning-desc">
+<title id="how-bot-thinks-learning-title">Self-play learning and strength checks</title>
+<desc id="how-bot-thinks-learning-desc">Complete self-play games label replay samples, policy and value losses update weights for the next batch, and frozen candidates separately challenge the current best.</desc>
+<defs>
+<marker id="learning-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f5d75"/></marker>
+<marker id="learning-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#eb6c36"/></marker>
+<marker id="learning-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#2e5aa8"/></marker>
+</defs>
+<rect width="1280" height="720" fill="#f5f5f5"/>
+<g class="arrow" marker-end="url(#learning-arrow)">
+<path d="M560 120 V160"/><path d="M560 256 V296"/><path d="M560 392 V432"/><path d="M560 512 V552"/>
+<path class="return" d="M400 596 H88 Q80 596 80 588 V88 Q80 80 88 80 H400"/>
+<path class="return" d="M720 472 H920"/><path d="M1040 512 V552"/>
+</g>
+<rect class="mask" x="752" y="444" width="136" height="20"/><text class="label" x="820" y="459">MILESTONE</text>
+<g>
+<rect class="node" x="400" y="40" width="320" height="80" rx="6"/><rect class="chip" x="412" y="52" width="48" height="16" rx="2"/><text class="tag" x="424" y="63">C++</text>
+<text class="name" x="560" y="88">Self-play with the current model</text><text class="body" x="560" y="108">Record a policy target at each placement</text>
+</g>
+<g>
+<rect class="node" x="400" y="160" width="320" height="96" rx="6"/><rect class="chip" x="412" y="172" width="64" height="16" rx="2"/><text class="tag" x="424" y="183">TERMINAL</text>
+<text class="name" x="560" y="208">Finish the real game</text><text class="tech" x="560" y="236">z = winner × sample's player</text>
+</g>
+<g>
+<rect class="node" x="400" y="296" width="320" height="96" rx="6"/><rect class="chip" x="412" y="308" width="56" height="16" rx="2"/><text class="tag" x="424" y="319">REPLAY</text>
+<text class="name" x="560" y="344">Recent learning examples</text><text class="tech" x="560" y="372">(position, policy π, result z)</text>
+</g>
+<g>
+<rect class="mask" x="400" y="432" width="320" height="80" rx="6"/><rect class="node focal" x="400" y="432" width="320" height="80" rx="6"/><rect class="chip" x="412" y="444" width="64" height="16" rx="2"/><text class="tag" x="424" y="455">PYTORCH</text>
+<text class="name" x="560" y="480">Update the model weights</text><text class="body" x="560" y="500">Policy cross-entropy + value squared error</text>
+</g>
+<g>
+<rect class="node" x="400" y="552" width="320" height="88" rx="6"/><rect class="chip" x="412" y="564" width="48" height="16" rx="2"/><text class="tag" x="424" y="575">SYNC</text>
+<text class="name" x="560" y="600">Give C++ the updated weights</text><text class="body" x="560" y="624">Safe boundary → next self-play batch</text>
+</g>
+<g>
+<rect class="node" x="920" y="432" width="240" height="80" rx="6"/><rect class="chip" x="932" y="444" width="56" height="16" rx="2"/><text class="tag" x="942" y="455">FREEZE</text>
+<text class="name" x="1040" y="480">Save a candidate</text><text class="body" x="1040" y="500">Every 1,000 completed games</text>
+</g>
+<g>
+<rect class="node" x="920" y="552" width="240" height="88" rx="6"/><rect class="chip" x="932" y="564" width="48" height="16" rx="2"/><text class="tag" x="944" y="575">GATE</text>
+<text class="name" x="1040" y="600">Challenge the current best</text><text class="body" x="1040" y="624">100 games · 50 color-swapped pairs</text>
+</g>
+<text class="heading" x="120" y="184">Two teachers</text>
+<text class="small" x="120" y="216">π teaches where to play.</text><text class="small" x="120" y="240">z teaches what a position was worth.</text>
+<text class="small" x="120" y="272">Tactical / forced / bootstrap moves</text><text class="small" x="120" y="296">use one-hot policy targets instead of visits.</text>
+<text class="heading" x="120" y="392">Do not confuse signals.</text>
+<text class="small" x="120" y="424">Proofs guide moves, not value labels.</text><text class="small" x="120" y="448">Lower loss does not prove greater strength.</text>
+<text class="small" x="120" y="480">Latest weights are not automatically best.</text>
+<line class="rule" x1="40" y1="660" x2="1240" y2="660"/>
+<text class="small" x="40" y="692">Solid arrow = learning path</text><text class="small" x="400" y="692">Dashed arrow = repeat / milestone</text><text class="small" x="840" y="692">Evaluation games never enter replay</text>
+</svg>
+</div>
+<figcaption>Rotate or reflect the board and its policy together during learning. Keep weights fixed during each search batch. The first frozen model is a baseline, not proven strength; later promotion requires a passing score and timing check.</figcaption>
+</figure>
+<div class="ideas">
+<div class="idea"><h3>The experiment worth running</h3><p>Train residual, pooled, and attention models in separate runs. Compare them under the same rules and thinking time. Measure strength per training hour, not GPU usage.</p></div>
+<div class="idea"><h3>The Connect6 detail that matters</h3><p>One placement is not always one turn. The same player can place two stones; value signs must follow the player, not blindly alternate after each stone.</p></div>
+</div>
+</section>
+<footer>
+<p>Idea map of the implemented engine · default light style · static HTML, no training controls.</p>
+<p>Grounded in <code>engine/network.py</code>, <code>engine/runtime.cpp</code>, <code>engine/native.cpp</code>, and <code>engine/training.py</code>. Fonts: Geist, Geist Mono, Instrument Serif; system fallbacks when offline.</p>
+</footer>
+</main>
+</body>
+</html>

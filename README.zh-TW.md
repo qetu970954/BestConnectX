@@ -6,6 +6,8 @@
 
 預設為 **15×15 自由五子棋、64 通道、6 個殘差區塊**。殘差區塊將輸入加回學習結果；寬度及深度可透過設定調整。不附帶已訓練 bot 權重。
 
+五子棋及六子棋也可選用 `pooled` 與 `attention` 模型，保留全部八個遊戲特徵、原生推論及安全續訓。見[模型 presets 與檢查](docs/model-options.zh-TW.md)及[架構決策](docs/adr/0002-shared-board-model-experiments.zh-TW.md)。
+
 ## 安裝與建置
 
 ```sh
@@ -64,7 +66,7 @@ Python：近期訓練樣本 → 模型更新 → 安全 checkpoint 及凍結模�
 C++：安全點接收更新權重 → 下一個對弈批次
 ```
 
-**PUCT** 是由模型落子分數及局面價值引導的樹搜尋。**TSS** 是威脅空間搜尋，用來尋找強制獲勝計畫。攻方搜尋有界；獨立檢查必須涵蓋所有可阻擋攻擊的回應，並排除對手先獲勝。未完成證明代表未知，不代表必敗。證明只引導落子；訓練標籤只取自真實終局。
+**MCTS**（蒙地卡羅樹搜尋）探索後續局面並回傳價值。**PUCT** 是其中的分支選擇規則，在估計價值、模型落子先驗及訪問次數之間取得平衡。**TSS** 是威脅空間搜尋，用來尋找強制獲勝計畫。攻方搜尋有界；獨立檢查必須涵蓋所有可阻擋攻擊的回應，並排除對手先獲勝。未完成證明代表未知，不代表必敗。證明只引導落子；訓練標籤只取自真實終局。
 
 - C++ 推論使用 FP32；CUDA 學習使用 BF16，CPU 學習使用 FP32。
 - 模型更新與棋局生成交替執行，搜尋批次期間不更新權重。
@@ -101,4 +103,4 @@ uv run python -m experiments.benchmark_native --device cpu --output .native-cach
 
 瀏覽器檢查使用已安裝 Chrome、CPU 及暫存 run，不下載瀏覽器。[驗證報告](docs/migration-validation.zh-TW.md)記錄分階段檢查及配對搜尋時間。短測試**不能**證明每訓練小時的棋力增益。
 
-現行需求：[已核准共識](docs/migration-requirements.zh-TW.md)。模型設計：[研究比較](docs/model-options.zh-TW.md)。[詞彙表](CONTEXT.zh-TW.md)定義遊戲共用語言。舊報告與 HTML 架構圖已標示歷史資料，不代表現行設計或速度。
+現行需求：[已核准共識](docs/migration-requirements.zh-TW.md)。模型設計：[研究比較](docs/model-options.zh-TW.md)。[詞彙表](CONTEXT.zh-TW.md)定義遊戲共用語言。過時的 Python 引擎報告及效能測試已移除；獨立 Python 參考實作仍保留供正確性測試。

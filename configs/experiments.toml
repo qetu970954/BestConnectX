@@ -1,4 +1,5 @@
-# Explicit command-line flags override this file. Resume restores learning settings.
+# Defaults checked on a Windows desktop with a multicore CPU and a CUDA-capable GPU.
+# Explicit command-line flags override new-run values; resume restores saved settings.
 [defaults]
 board_size = "15*15"
 connect = 5
@@ -6,6 +7,7 @@ stones_per_turn = 1
 starter_stones = 1
 channels = 64
 blocks = 6
+architecture = "residual"
 workers = 6
 parallel = 64
 simulations = 64
@@ -45,7 +47,25 @@ channels = 128
 blocks = 10
 parallel = 32
 
+[presets.gomoku-pooled]
+architecture = "pooled"
+
+[presets.gomoku-attention]
+architecture = "attention"
+
 [presets.connect6]
 board_size = "19*19"
 connect = 6
 stones_per_turn = 2
+
+[presets.connect6-pooled]
+board_size = "19*19"
+connect = 6
+stones_per_turn = 2
+architecture = "pooled"
+
+[presets.connect6-attention]
+board_size = "19*19"
+connect = 6
+stones_per_turn = 2
+architecture = "attention"

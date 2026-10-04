@@ -4,9 +4,7 @@
 
 **狀態：已核准。使用者確認「This scope is correct—start implementation.」。已實作共識範圍，檢查及限制見[驗證報告](migration-validation.zh-TW.md)。**
 
-本文件記錄目前討論。只有明確標示「已同意」的項目才是核准需求，其餘建議尚未核准。
-
-既有[需求文件](alignment.md)及 [ADR 0001](adr/0001-python-reference-and-native-search.md)描述先前工作；本核准共識取代其中相衝突的舊需求。
+本文件記錄已核准移植共識。後續[模型實驗決議](adr/0002-shared-board-model-experiments.zh-TW.md)加入可選池化及注意力模型，不取代殘差預設。此次整理移除過時報告及半原生搜尋路徑，保留獨立 Python 正確性參考實作。先前實作歷史可由 Git 及 [ADR 0001](adr/0001-python-reference-and-native-search.zh-TW.md)查閱。
 
 ## 第一至第三輪已同意方向
 
@@ -25,7 +23,7 @@
 | Q11 | 續訓是必要需求，不用將自我對弈棋譜保存到本機磁碟。 | 不建立已完成自我對弈棋譜封存。Q17 允許 checkpoint 保存有界 replay 樣本及未完成棋局；Q18 保留小型棋局摘要。 |
 | Q12 | 核准建議測試預算。 | GPU 程序累計實際時間最多五分鐘，包含暖機。僅暫存推論／搜尋及短訓練／續訓測試，不啟動持久訓練，額外 GPU 工作先詢問。 |
 | Q13 | 同意常用英文、短句及已定義技術名詞。 | 產品名稱、程式碼、指令及路徑允許例外。不宣稱已對未指定的 4,000 字單字表完成嚴格檢查。 |
-| Q14 | 同意建議文件配置。 | 根目錄提供英文／繁體中文 README。現行指南與 cheatsheet 放在 `docs/`，搭配 `.zh-TW.md` 版本。舊報告明確標示歷史記錄。 |
+| Q14 | 同意建議文件配置。 | 根目錄提供英文／繁體中文 README。現行指南與 cheatsheet 放在 `docs/`，搭配 `.zh-TW.md` 版本。依此次整理要求移除過時報告；Git 保留歷史。 |
 | Q15 | A：模型更新保留在 Python，自我對弈使用 C++。 | Python／PyTorch 執行 loss、梯度及 optimizer 更新。C++ 負責推論及完整對弈。 |
 | Q16 | A：可設定的一般殘差網路。 | 15×15 起始使用 64 通道、6 區塊。提供較小的測試 presets 及較大的實驗 presets；其他模型種類先保留在研究文件。 |
 | Q17 | 同意 checkpoint 保存 replay 與進行中棋局狀態。 | 保存有界近期 replay、權重、optimizer、進行中棋局、計數器、待辦工作及 RNG 狀態。不永久匯出逐局 replay。 |
@@ -33,36 +31,6 @@
 | Q19 | 同意原生工作執行緒及批次 C++ 推論。 | 原生 CPU 工作執行緒搭配單一批次 C++ GPU 推論路徑。在安全點交替生成及 Python 學習；搜尋批次執行期間不更新權重。第一版不建立獨立 actor／learner 服務。 |
 | Q20 | 同意簡單設定／續訓規則，使用方式寫入 cheatsheet。 | 每個實驗一份 TOML 設定檔、命名 presets 及明確 CLI 覆寫。續訓恢復模型／棋規／學習設定；執行時限、裝置、工作執行緒及棋局並行量可調整。不同模型形狀或棋規須建立新 run。 |
 | Q21 | 同意分階段檢查及效能報告。 | 短測試檢查正確性、模型一致性、更新、續訓及速度。每訓練小時的棋力增益須另由使用者執行長期比較。 |
-
-## 仍在範圍內的工作
-
-1. 使用 C++ 有效運用硬體，尤其是自我對弈棋盤生成。
-2. 決定變更時，分開考慮 CPU、GPU 及檔案 I/O。
-3. 重構設定，讓實驗容易建立及調整。
-4. 整理 README 與 cheatsheet。
-5. 先透過訪談確定需求，再修改程式碼。
-6. 透過設定支援較深／較寬模型，使用 C++ 推論。
-7. 不封存已完成自我對弈棋譜，但必須安全續訓。
-
-使用者已撤回實驗重現目標。設定重構及安全續訓仍是必要需求。
-
-## 移植前已確認現況
-
-- CPU：多核心桌上型 CPU；不公開確切型號和核心數。
-- RAM：不公開確切容量。
-- GPU：支援 CUDA 的 GPU；不公開確切型號和記憶體容量。
-- 單一 Python 遊戲實作支援正方形棋盤與一／兩子回合，見 [`engine/game.py`](../engine/game.py)。
-- C++ 已處理批次特徵、連線計數、PUCT 邊選擇、樹遍歷及搜尋統計更新，見 [`engine/native.cpp`](../engine/native.cpp)。
-- 原生搜尋仍由 Python 複製新葉節點棋盤、落子及展開合法動作，見 [`engine/search.py`](../engine/search.py)。
-- TSS 搜尋與獨立證明檢查仍使用 Python。證明只引導落子，棋局仍必須達到真實終局。
-- PyTorch 已使用編譯後的 CPU／CUDA 運算。C++ 模型呼叫可能降低 Python 成本，但不保證 GPU 運算更快。
-- `--parallel` 表示批次中的棋局根節點數，不代表 CPU 工作執行緒數。
-- 搜尋、學習更新、評估及保存依序執行。
-- 磁碟使用量已在 run lock 保護下快取。現有實作包含原子寫入、容量上限及復原檢查。
-- 設定分散於 CLI 旗標及程式碼常數，目前沒有實驗設定檔介面。
-- 這份 checkout 沒有已保存的訓練棋局或權重。
-
-[效能報告](training-performance.md)、[架構圖](project-architecture.html)及 ADR 部分程式碼描述已過時。舊量測不是本次移植結果。
 
 ## 決策樹
 
@@ -127,8 +95,7 @@ CPU 檢查不計入 GPU 預算。GPU 測試程序從啟動到結束的實際時�
 ## 相關文件
 
 - [README](../README.md) 與 [cheatsheet](cheatsheet.zh-TW.md)。
-- [先前需求](alignment.md)。
-- [先前原生搜尋決議](adr/0001-python-reference-and-native-search.md)。
+- [先前原生搜尋決議](adr/0001-python-reference-and-native-search.zh-TW.md)。
 - [領域詞彙](../CONTEXT.md)。
 - [PyTorch C++ 研究](pytorch-cpp.zh-TW.md)。
 - [模型種類與參數數量](model-options.zh-TW.md)。

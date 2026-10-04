@@ -100,7 +100,7 @@ function render() {
   const sourceNames = {mcts: 'MCTS', heuristic: '啟發式', forced: '單一候選', proof_move: '短程證明', tss_move: 'TSS 證明'};
   $('selfplay-sources').textContent = decisions ? `${sources.map(([source, count]) => `${sourceNames[source] || source} ${count.toLocaleString()}（${(100 * count / decisions).toFixed(1)}%）`).join(' · ')}。不含預設開局子。` : '尚無落子來源資料';
   const config = state.network, timing = state.timings || {};
-  $('model-runtime').textContent = config ? `C++ / LibTorch · ${state.device || '尚未選擇裝置'} · ${config.channels} 通道 × ${config.blocks} 殘差區塊 · ${state.workers || 6} CPU 工作執行緒` : 'C++ / LibTorch · 尚無訓練模型；可使用原生啟發式對戰';
+  $('model-runtime').textContent = config ? `C++ / LibTorch · ${state.device || '尚未選擇裝置'} · ${config.architecture || 'residual'} · ${config.channels} 通道 × ${config.blocks} 殘差區塊 · ${state.workers || 6} CPU 工作執行緒` : 'C++ / LibTorch · 尚無訓練模型；可使用原生啟發式對戰';
   $('native-times').textContent = Object.keys(timing).length ? `累計實測：原生搜尋 ${(timing.cpu_search_seconds || 0).toFixed(2)}s · 推論 ${(timing.inference_seconds || 0).toFixed(2)}s · 學習 ${(timing.learning_seconds || 0).toFixed(2)}s · 保存 ${(timing.checkpoint_seconds || 0).toFixed(2)}s。不是硬體使用率。` : '搜尋／推論／學習／保存時間會在 CLI 檢查點更新；未量測值不代表零成本。';
   const metric = state.loss_metrics || history.metrics.at(-1);
   plot('loss-chart', history.metrics, ['loss', 'policy_loss', 'value_loss']);
