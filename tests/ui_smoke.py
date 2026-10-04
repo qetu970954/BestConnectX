@@ -89,16 +89,16 @@ def check(data, flags, connect6, browser):
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.evaluate("notice('')")
         page.locator('#seconds').fill('.02')
-        page.locator('.stats-details summary').focus()
+        page.locator('.selfplay-card .stats-details summary').focus()
         page.keyboard.press('Enter')
-        expect(page.locator('.stats-details')).to_have_attribute('open', '')
+        expect(page.locator('.selfplay-card .stats-details')).to_have_attribute('open', '')
         if stats['games']:
             expect(page.locator('#selfplay-length-range')).to_contain_text(f"最短 {stats['min_placements']} 子")
             if stats['source_counts']:
                 expect(page.locator('#selfplay-sources')).not_to_contain_text('尚無落子來源資料')
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.keyboard.press('Enter')
-        expect(page.locator('.stats-details')).not_to_have_attribute('open', '')
+        expect(page.locator('.selfplay-card .stats-details')).not_to_have_attribute('open', '')
         center = size * size // 2
         page.locator('.cell').nth(center).click()
         expect(page.locator('.black, .white')).to_have_count(3 if connect6 else 2, timeout=60000)
@@ -164,7 +164,7 @@ with tempfile.TemporaryDirectory() as name:
     # Short milestone/turn budgets test artifacts and charts, not playing strength.
     result = subprocess.run([sys.executable, 'train.py', '--data', str(data), '--device', 'cpu', '--hours', '.02',
         '--parallel', '2', '--batch', '2', '--simulations', '2', '--snapshot-every', '8', '--seconds', '.02',
-        '--max-games', '16'], cwd=ROOT, capture_output=True, text=True, timeout=90)
+        '--max-games', '16', '--channels', '4', '--blocks', '1', '--tactical-ms', '0'], cwd=ROOT, capture_output=True, text=True, timeout=90)
     if result.returncode:
         raise RuntimeError(result.stderr)
     # Normal training intentionally leaves evaluation pending when its 20% credit is exhausted.
@@ -176,15 +176,16 @@ with tempfile.TemporaryDirectory() as name:
     # Legal statistics-only fixtures verify distinct placement/turn lengths and both colors on 19x19.
     standard = root / 'connect6-standard'
     rules = Rules(19, 19, 6, 2, 1)
+    summaries = []
     for number, moves in enumerate((
         [0, 19, 20, 1, 2, 21, 22, 3, 4, 23, 40, 5],
         [200, 0, 1, 201, 202, 2, 3, 219, 220, 4, 359, 203, 204, 5]), 1):
         game = Game.from_moves(moves, rules=rules)
         assert game.done and game.winner == (1 if number == 1 else -1)
-        save_json(standard / 'selfplay' / f'game-{number:09d}.json', {
-            'game': number, 'rules': rules.id, 'rule_config': rules.to_dict(),
-            'moves': moves, 'winner': game.winner, 'complete': True,
-            'turns': [{'source': 'mcts'} for _ in moves[1:]]})
+        summaries.append({'game': number, 'placements': len(moves), 'winner': game.winner,
+            'turns': 1 + (len(moves)-rules.starter_stones+rules.stones_per_turn-1)//rules.stones_per_turn,
+            'source_counts': {'mcts': len(moves)-1}})
+    save_json(standard / 'selfplay-stats.json', {'summaries': summaries})
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=chrome, headless=True, args=['--disable-gpu'])
         check(data, [], False, browser)
@@ -193,4 +194,4 @@ with tempfile.TemporaryDirectory() as name:
         check(standard, ['--connect', '6', '--board_size', '19*19',
               '--stones_per_turn', '2', '--starter-stones', '1'], True, browser)
         browser.close()
-    print('Browser checks passed: single viewport at 1920x1080/960, self-play stats/empty states, accessible details/history, 9x9/13x13/19x19 boards, full turns, charts, keyboard, mobile, CSRF, no browser training, run lock, no JS errors.')
+    print('Browser checks passed: single viewport at 1920x1080/960, self-play stats/empty states, accessible details/history, 15x15/13x13/19x19 boards, full turns, charts, keyboard, mobile, CSRF, no browser training, run lock, no JS errors.')

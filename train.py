@@ -1,4 +1,4 @@
-"""Direct training entry point: python train.py --connect 5 --board_size '9*9' ..."""
+"""Training entry point: uv run python train.py --preset gomoku --data PATH."""
 import sys
 from engine.cli import main
 

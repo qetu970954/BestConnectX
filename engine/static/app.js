@@ -64,7 +64,7 @@ function render() {
   buildBoard(game);
   $('rule-title').textContent = `${size}×${size} · 連${rules.connect}棋`;
   $('rule-detail').textContent = `黑棋開局 ${rules.starter_stones} 子，之後每回合 ${rules.stones_per_turn} 子。訓練採用 8 種旋轉／反射增強。`;
-  $('train-command').textContent = `python train.py --connect ${rules.connect} --board_size "${size}*${size}" --stones_per_turn ${rules.stones_per_turn} --starter-stones ${rules.starter_stones} --data "${state.data_directory}"`;
+  $('train-command').textContent = `uv run python train.py --connect ${rules.connect} --board_size "${size}*${size}" --stones_per_turn ${rules.stones_per_turn} --starter-stones ${rules.starter_stones} --data "${state.data_directory}"`;
   cells.forEach((button, i) => {
     button.classList.toggle('black', game.board[i] === 1); button.classList.toggle('white', game.board[i] === -1); button.classList.toggle('last', i === last);
     const who = game.board[i] === 1 ? '黑棋' : game.board[i] === -1 ? '白棋' : '空格';
@@ -85,7 +85,7 @@ function render() {
   $('milestone').textContent = `下一個模型：${Number(state.next_milestone || 1000).toLocaleString()} 場 · ${Math.ceil((state.remaining_seconds || 0) / 60)} 分鐘剩餘 · 時間目標 80/20（評估已用 ${(100 * Number(state.evaluation_share || 0)).toFixed(1)}%）· 同時 ${state.parallel || 64} 盤`;
   const selfplay = history.selfplay || {window: 1000, games: 0, source_counts: {}};
   $('selfplay-window').textContent = `${selfplay.games.toLocaleString()} / ${selfplay.window.toLocaleString()}`;
-  $('selfplay-range').textContent = selfplay.games ? `已保存第 ${selfplay.first_game.toLocaleString()}–${selfplay.last_game.toLocaleString()} 盤` : '尚無已保存的完整棋局';
+  $('selfplay-range').textContent = selfplay.games ? `第 ${selfplay.first_game.toLocaleString()}–${selfplay.last_game.toLocaleString()} 盤摘要；不保存自我對弈棋譜` : '尚無完整棋局摘要';
   for (const [id, key] of [['selfplay-length', 'mean_placements'], ['selfplay-turns', 'mean_turns'], ['selfplay-median', 'median_placements']]) {
     $(id).textContent = Number.isFinite(selfplay[key]) ? selfplay[key].toFixed(1) : '—';
   }
@@ -99,6 +99,9 @@ function render() {
   const sources = Object.entries(selfplay.source_counts), decisions = sources.reduce((total, [, count]) => total + count, 0);
   const sourceNames = {mcts: 'MCTS', heuristic: '啟發式', forced: '單一候選', proof_move: '短程證明', tss_move: 'TSS 證明'};
   $('selfplay-sources').textContent = decisions ? `${sources.map(([source, count]) => `${sourceNames[source] || source} ${count.toLocaleString()}（${(100 * count / decisions).toFixed(1)}%）`).join(' · ')}。不含預設開局子。` : '尚無落子來源資料';
+  const config = state.network, timing = state.timings || {};
+  $('model-runtime').textContent = config ? `C++ / LibTorch · ${state.device || '尚未選擇裝置'} · ${config.channels} 通道 × ${config.blocks} 殘差區塊 · ${state.workers || 6} CPU 工作執行緒` : 'C++ / LibTorch · 尚無訓練模型；可使用原生啟發式對戰';
+  $('native-times').textContent = Object.keys(timing).length ? `累計實測：原生搜尋 ${(timing.cpu_search_seconds || 0).toFixed(2)}s · 推論 ${(timing.inference_seconds || 0).toFixed(2)}s · 學習 ${(timing.learning_seconds || 0).toFixed(2)}s · 保存 ${(timing.checkpoint_seconds || 0).toFixed(2)}s。不是硬體使用率。` : '搜尋／推論／學習／保存時間會在 CLI 檢查點更新；未量測值不代表零成本。';
   const metric = state.loss_metrics || history.metrics.at(-1);
   plot('loss-chart', history.metrics, ['loss', 'policy_loss', 'value_loss']);
   $('loss-value').textContent = metric ? `總 loss ${metric.loss.toFixed(4)} · 策略 ${metric.policy_loss.toFixed(4)} · 價值 ${metric.value_loss.toFixed(4)}` : '尚無訓練更新';

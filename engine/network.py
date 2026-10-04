@@ -2,7 +2,8 @@
 import numpy as np
 import torch
 from torch import nn
-from .game import DEFAULT_RULES, batch_features
+from .game import batch_features
+from .runtime import DEFAULT_RULES
 
 
 class Residual(nn.Module):
@@ -18,9 +19,12 @@ class Residual(nn.Module):
 
 
 class Network(nn.Module):
-    def __init__(self, channels=32, blocks=2, size=DEFAULT_RULES.height):
+    def __init__(self, channels=64, blocks=6, size=DEFAULT_RULES.height):
         super().__init__()
-        self.config = {"channels": channels, "blocks": blocks, "size": size}
+        if any(type(value) is not int for value in (channels, blocks, size)) or not (4 <= channels <= 256 and 0 <= blocks <= 32 and 2 <= size <= 25):
+            raise ValueError('Model needs 4..256 channels, 0..32 blocks, and board size 2..25.')
+        self.config = {'channels': channels, 'blocks': blocks, 'size': size}
+        self._native_dirty = True
         self.trunk = nn.Sequential(nn.Conv2d(8, channels, 3, padding=1, bias=False),
                                    nn.BatchNorm2d(channels), nn.ReLU(),
                                    *(Residual(channels) for _ in range(blocks)))

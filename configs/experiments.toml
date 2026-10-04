@@ -1,0 +1,51 @@
+# Explicit command-line flags override this file. Resume restores learning settings.
+[defaults]
+board_size = "15*15"
+connect = 5
+stones_per_turn = 1
+starter_stones = 1
+channels = 64
+blocks = 6
+workers = 6
+parallel = 64
+simulations = 64
+batch = 128
+seed = 5070
+learning_rate = 0.001
+replay_limit = 20000
+bootstrap_games = 16
+updates_per_cycle = 32
+tactical_ms = 2.0
+snapshot_every = 1000
+hours = 2.0
+disk_gib = 20.0
+device = "auto"
+
+[presets.gomoku]
+
+[presets.tictactoe]
+board_size = "3*3"
+connect = 3
+channels = 8
+blocks = 1
+workers = 1
+parallel = 1
+batch = 8
+simulations = 16
+bootstrap_games = 2
+snapshot_every = 16
+
+[presets.gomoku-small]
+channels = 32
+blocks = 2
+parallel = 32
+
+[presets.gomoku-large]
+channels = 128
+blocks = 10
+parallel = 32
+
+[presets.connect6]
+board_size = "19*19"
+connect = 6
+stones_per_turn = 2

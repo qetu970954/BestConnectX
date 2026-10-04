@@ -1,4 +1,4 @@
-"""Optional original C++ kernels through stdlib ctypes. Build: python -m engine.native."""
+"""Original C++ engine and LibTorch inference through ctypes. Build: python -m engine.native."""
 import ctypes
 from functools import lru_cache
 import hashlib
@@ -10,20 +10,25 @@ import numpy as np
 
 SOURCE = Path(__file__).with_suffix('.cpp')
 CACHE = SOURCE.parent.parent / '.native-cache'
+SOURCES = [SOURCE, SOURCE.with_name('runtime.cpp'), SOURCE.with_name('inference.cpp')]
 
 
 def library_path():
+    import torch
     extension = '.dll' if os.name == 'nt' else '.so'
-    return CACHE / ('kernels-' + hashlib.sha256(SOURCE.read_bytes()).hexdigest()[:16] + extension)
+    content = b''.join(path.read_bytes() for path in [*SOURCES, SOURCE.with_name('runtime.h')])
+    content += str(torch.__version__).encode()
+    return CACHE / ('engine-' + hashlib.sha256(content).hexdigest()[:16] + extension)
 
 
 @lru_cache(maxsize=1)
 def library():
-    if os.environ.get('BESTCONNECT6_NATIVE') == '0':
+    if os.environ.get('BESTCONNECTX_NATIVE', os.environ.get('BESTCONNECT6_NATIVE')) == '0':
         return None
     path = library_path()
     if not path.exists():
         return None
+    import torch  # Load the wheel's matching CPU/CUDA DLLs before our LibTorch client.
     backend = ctypes.CDLL(str(path))
     array = np.ctypeslib.ndpointer
     backend.connection_features.argtypes = [
@@ -140,8 +145,12 @@ class Tree:
 
 
 def build():
+    import torch
     CACHE.mkdir(exist_ok=True)
     output = library_path()
+    torch_root = Path(torch.__file__).parent
+    includes = [torch_root / 'include', torch_root / 'include/torch/csrc/api/include']
+    libraries = torch_root / 'lib'
     if os.name == 'nt':
         installer = Path(os.environ.get('ProgramFiles(x86)', 'C:/Program Files (x86)'))
         vswhere = installer / 'Microsoft Visual Studio/Installer/vswhere.exe'
@@ -149,18 +158,25 @@ def build():
             '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
             '-property', 'installationPath'], text=True).strip()
         if not install:
-            raise RuntimeError('Install MSVC C++ build tools, or use the Python backend.')
+            raise RuntimeError('Install MSVC x64 C++ build tools to build the native engine.')
         setup = Path(install) / 'Common7/Tools/VsDevCmd.bat'
+        source_flags = ' '.join(f'"{path}"' for path in SOURCES)
+        include_flags = ' '.join(f'/I"{path}"' for path in includes)
         command = (f'call "{setup}" -no_logo -arch=x64 -host_arch=x64 && '
-                   f'cl /nologo /O2 /std:c++17 /EHsc /MT /LD /fp:strict "{SOURCE}" '
-                   f'/Fe:"{output}" /Fo:"{CACHE / "native.obj"}" /link /INCREMENTAL:NO')
+                   f'cl /nologo /utf-8 /O2 /std:c++17 /EHsc /MD /LD /fp:strict /DNOMINMAX '
+                   f'/DWIN32_LEAN_AND_MEAN {include_flags} {source_flags} '
+                   f'/Fe:"{output}" /Fo:"{CACHE}/" /link /INCREMENTAL:NO '
+                   f'/LIBPATH:"{libraries}" torch_cpu.lib c10.lib torch.lib')
         subprocess.run('cmd.exe /d /s /c "' + command + '"', cwd=CACHE, check=True)
     else:
         compiler = shutil.which('c++')
         if compiler is None:
-            raise RuntimeError('Install a C++ compiler, or use the Python backend.')
-        subprocess.run([compiler, '-O3', '-std=c++17', '-shared', '-fPIC',
-                        '-ffp-contract=off', str(SOURCE), '-o', str(output)], check=True)
+            raise RuntimeError('Install a C++17 compiler to build the native engine.')
+        subprocess.run([compiler, '-O3', '-std=c++17', '-shared', '-fPIC', '-pthread',
+                        '-ffp-contract=off', f'-D_GLIBCXX_USE_CXX11_ABI={int(torch._C._GLIBCXX_USE_CXX11_ABI)}',
+                        *[f'-I{path}' for path in includes], *map(str, SOURCES),
+                        f'-L{libraries}', f'-Wl,-rpath,{libraries}', '-ltorch_cpu', '-lc10', '-ltorch',
+                        '-o', str(output)], check=True)
     library.cache_clear()
     print(f'Built {output}')
 

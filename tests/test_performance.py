@@ -85,20 +85,10 @@ class PerformanceTests(unittest.TestCase):
                 np.testing.assert_array_equal(features,
                     Game(board, row['player'], row['left'], rules=rules).features())
 
-    def test_resume_reads_only_recent_games_and_deduplicates_pending_exports(self):
-        root = Path('unused-run')
-        paths = [root / 'replay' / f'game-{number:09d}.pt' for number in range(1, 6)]
-        state = {'settings': {'replay_limit': 5},
-                 'pending_games': [{'record': {'game': 5}, 'samples': [50, 51]}]}
-        def load(path):
-            number = int(path.stem.split('-')[1])
-            return {'samples': [10 * number, 10 * number + 1]}
-        with patch.object(Path, 'glob', return_value=iter(paths)), \
-                patch('engine.training.load_checkpoint', side_effect=load) as loaded:
-            self.assertEqual(_replay_window(root, state), [31, 40, 41, 50, 51])
-            self.assertEqual([call.args[0] for call in loaded.call_args_list], [paths[3], paths[2]])
-        with patch.object(Path, 'glob', return_value=iter([])):
-            self.assertEqual(_replay_window(root, state), [50, 51])
+    def test_resume_uses_only_bounded_checkpoint_replay_without_disk_scans(self):
+        state = {'settings': {'replay_limit': 5}, 'replay': [10, 20, 30, 40, 50, 60]}
+        with patch.object(Path, 'glob', side_effect=AssertionError('Archive scan')):
+            self.assertEqual(_replay_window(Path('unused-run'), state), [20, 30, 40, 50, 60])
 
     def test_batched_features_match_scalar_features_across_rules_and_cache_edits(self):
         rng = np.random.default_rng(5070)

@@ -1,4 +1,6 @@
-# Validation
+# Historical validation
+
+> Results before the full C++ migration. Old archive/fallback checks and test counts are not current acceptance results. See [migration checks and timings](migration-validation.md).
 
 Framework checks establish operation and recovery, not playing strength or optimal settings. Architecture and commands are in the [project diagram](project-architecture.html) and [README](../README.md).
 

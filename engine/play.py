@@ -3,11 +3,9 @@ import json
 from pathlib import Path
 import re
 import sys
-import time
 from .network import device_for
 from .storage import load_json, run_lock
-from .selfplay import turn_action
-from .game import DEFAULT_RULES, Game, Rules
+from .runtime import DEFAULT_RULES, Game, Rules, full_turn
 from .training import network
 
 
@@ -35,16 +33,6 @@ def play(args):
                 raise ValueError("Choose best, latest, heuristic, or a saved model filename.")
             entry = {"kind": "candidate", "file": f"models/{args.model}", "id": args.model[:-3]}
         net = network(root, entry, device_for(args.device), rules) if entry.get("file") else None
-        color, started, moves = game.player, time.monotonic(), []
-        plan, proof_plan, strategy = [], [None], [payload.get("strategy")]
-        while not game.done and game.player == color:
-            remaining = max(0, args.seconds - (time.monotonic() - started))
-            action = turn_action(game, net, remaining / game.left, 100_000, lambda: False,
-                                tactics=True, tss=True, plan=plan, proof_plan=proof_plan, strategy=strategy)
-            game.play(action)
-            if plan:
-                plan.pop(0)
-            moves.append(action)
-        print(json.dumps({"moves": moves, "model": entry.get("id", "heuristic"),
-                          "kind": entry["kind"], "seconds": time.monotonic() - started,
-                          "strategy": strategy[0]}))
+        moves, strategy, duration = full_turn(game, net, args.seconds, payload.get('strategy'))
+        print(json.dumps({'moves': moves, 'model': entry.get('id', 'heuristic'),
+                          'kind': entry['kind'], 'seconds': duration, 'strategy': strategy}))

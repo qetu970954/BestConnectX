@@ -17,6 +17,7 @@ gate-archive/
 run.json
 rules.json
 status.json
+selfplay-stats.json
 incumbent.json
 run.lock
 stop

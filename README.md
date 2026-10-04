@@ -1,137 +1,104 @@
-# BestConnect6
+# BestConnectX
 
-Original AlphaZero-style self-play + verified TSS for **square-board connection games**. Train from the CLI; play and inspect results in the browser.
+[繁體中文](README.zh-TW.md) · [Cheatsheet](docs/cheatsheet.md) · [Native engine](docs/native-engine.md) · [Checks and timings](docs/migration-validation.md)
 
-**Status:** CUDA training, persistence, safe stop/resume and a complete 9×9 model comparison have been exercised. This validates the framework—not playing strength or optimal settings. Local games/models are generated artifacts, not shipped weights. Start with the [project architecture diagram](docs/project-architecture.html) and [validation results](docs/connection-validation.md).
+A local, from-scratch connection-game bot. **C++ runs playing and model inference. Python/PyTorch updates the model and manages experiments.** The browser is for results and play, not training controls.
 
-## Start
+Default: **15×15 freestyle Gomoku**, with **64 channels and 6 residual blocks**. A residual block adds its input to its learned result. Width and depth can change through config. No trained bot weights are shipped.
+
+## Setup
 
 ```sh
 uv sync --locked
-
-# 9×9 Gomoku
-uv run python train.py --connect 5 --board_size "9*9" --stones_per_turn 1 --starter-stones 1
-
-# Standard Connect6
-uv run python train.py --connect 6 --board_size "19*19" --stones_per_turn 2 --starter-stones 1
-
-# Play/results dashboard
+uv run python -m engine.native
 uv run python dashboard.py --open-browser
 ```
 
-Windows: `start.cmd` opens the dashboard. Default URL: **http://127.0.0.1:8765**.
-With `--data PATH`, the dashboard automatically loads that run's saved rules.
-Only one dashboard can own a port: close the old dashboard with Ctrl+C, or use `--port 8766` for another run.
+The native build is required. On Windows it uses installed MSVC x64 C++ tools and the headers/libraries in the installed PyTorch wheel. No separate CUDA SDK, CMake, or model export is needed for this route. Windows CPU/CUDA use was checked with PyTorch 2.11.0+cu128. The Unix build path needs a C++17 compiler; it has not been checked here.
 
-Optional CPU acceleration (C++17 compiler required):
+The dashboard opens at **http://127.0.0.1:8765**. Close it with Ctrl+C. Use `--port 8766` for another dashboard. Run all commands from the repo root. Rebuild after changing native sources or PyTorch.
 
-```sh
-uv run python -m engine.native
-```
+## Train, stop, resume
 
-This builds original feature and search-selection kernels in `.native-cache/`.
-They are already built on this machine and load automatically. Other machines
-use the Python backend until built; rebuild after editing `engine/native.cpp`.
-Set `BESTCONNECT6_NATIVE=0` before starting Python to select the reference backend.
-See [measured speedups and bottlenecks](docs/training-performance.md).
-
-- Boards are **N×N**, N = 2..25; `9*13` is rejected. Quote the `*` in shell commands.
-- `--connect` is 2..N; a run of this length or longer wins horizontally, vertically or diagonally. No forbidden moves or swap opening.
-- Black's first turn uses `--starter-stones`; all later turns use `--stones_per_turn`. Both accept 1 or 2. A win ends play immediately, even midway through a turn.
-- Rules select separate default directories, e.g. `data/connect5-9x9-s1-o1-v1`. Use `--data PATH` for another run. Different square sizes work, but weights/data are not shared across configurations.
-
-## Stop, resume, inspect
-
-Run the **same training command** to resume. Sessions default to two hours; `--hours` changes the limit. Ctrl+C requests a safe checkpoint—wait for the save message before closing. An abrupt kill can lose work since the last save.
+These commands start training **only when you run them**:
 
 ```sh
-uv run python -m engine status --data data/connect5-9x9-s1-o1-v1
-uv run python -m engine stop --data data/connect5-9x9-s1-o1-v1
-uv run python dashboard.py --data data/connect6-19x19-s2-o1-v1 --open-browser
+uv run python train.py
+uv run python -m engine status --data data/connect5-15x15-s1-o1-v1
+uv run python -m engine stop --data data/connect5-15x15-s1-o1-v1
 ```
 
-Seed and learning settings are fixed at run creation; resume uses the saved settings. `--parallel N` explicitly changes self-play concurrency on resume without dropping unfinished games. `--seconds` sets future gate limits; changing a pending gate requires `--restart-gate`. Session duration, device and disk cap may change. `--device auto` selects CUDA when available; use `--device cpu` for checks. These are user-started commands, not authorization for agent-run GPU work.
+Ctrl+C or `stop` asks for a safe checkpoint. Wait for the saved message. An abrupt kill can lose work since the last save.
 
-The browser has **no training controls**. Pause CLI work before bot play. It supports either color, complete bot turns, latest/best/milestone model selection, loss curves and candidate win-rate/score charts. Keyboard: arrows navigate; Enter/Space places a stone. Requests stay local and mutations require a same-origin token.
-
-### Rolling self-play statistics
-
-The dashboard summarizes the **latest 1,000 saved, completed training games**, ordered by completion number. With fewer games, it uses all available records. It shows:
-
-- Mean stone placements and mean turns, plus median, shortest and longest game lengths.
-- Black wins, white wins and draws, with counts and rates. All games, including draws, are in each rate's denominator.
-- The number of games and their completion-number range.
-- Decision-source counts and percentages: MCTS, heuristic, single-candidate and verified proof/TSS placements. Preset opening stones are excluded from these source counts.
-
-Game length includes the opening. One player's turn counts as one turn; a final partial turn also counts. Evaluation games and augmented replay samples are excluded.
-
-Statistics use existing `selfplay/game-*.json` records and update after dataset exports at checkpoints, not after each live placement. The browser polls every two seconds. No extra training writes or checkpoint changes are needed. Older records stay saved; the 1,000-game window does not delete them. These rates describe training data, **not model strength**.
-
-## Learning and model replacement
-
-- Small from-scratch policy/value network, batched PUCT self-play and independently verified TSS. Every training/evaluation game plays to an actual terminal result; unknown search results are not win/loss labels.
-- Target **80% training / 20% evaluation** of measured active wall time. Evaluation earns one second per four training seconds and yields between placements; unfinished gates resume while training continues. Counters survive safe stop/resume. No pending gate means 100% training; cooperative operations may briefly overshoot a slice.
-- New runs use **64 concurrent self-play games** (`--parallel`), batched inference across unresolved roots and cached live boards. `--batch` is the separate optimizer minibatch size (default 128). Larger game batches retain proportional optimizer work.
-- Loss = policy cross-entropy + value MSE. Four rotations × optional reflection provide **eight symmetries**, sampled on the fly for boards and matching policy targets. Value labels stay unchanged; no eightfold storage duplication.
-- Save immutable models every **1,000 completed self-play games**. The first is an initial comparison baseline, not a validated strength claim.
-- Later snapshots challenge the current best over **100 games / 50 color-swapped legal opening pairs**. New gates cap each engine at **0.25 seconds per complete turn** and the saved self-play simulation count per placement (default 64), rather than searching up to 100,000 simulations. This compares short-search play, not five-second strength.
-- Snapshots produced while a gate is pending stay queued on disk. Each queued gate freezes the then-current best when it starts.
-- Gate slices reuse their two frozen networks while still rechecking file checksums; model loading counts toward evaluation time. Whole-turn overtime survives pauses between stones.
-- Replace the incumbent only above **50 points** (win 1, draw 0.5, loss 0), with verified terminal histories and no clock overrun above 0.1 seconds. Ties retain the old model; failed candidates and previous bests stay saved.
-- Gates resume across sessions and never enter replay. Models/settings/source are frozen; mismatched rules, altered weights or changed gate code are rejected.
-
-This is an internal raw-score comparison, **not Elo, a confidence guarantee or proof of external strength**. Timed search is cooperative; GPU kernels/OS stalls cannot be preempted. Model loading is outside thinking time.
-
-**Fresh start: do not use `--restart-gate`.** For a future unfinished gate after changing search code/limits, that flag explicitly archives the report and restarts the same frozen models without mixing old results. Omit it on normal resume.
-
-To finish a pending gate without training (**explicit evaluation-only mode bypasses the 80/20 scheduler**):
+Repeat the training command to resume. With a custom run, `train.py --data PATH` restores its saved rules, model, and learning settings. Explicit runtime limits, device, worker count, and game concurrency may change. A different model shape or rule set needs a new run directory.
 
 ```sh
-uv run python -m engine evaluate --data data/connect5-9x9-s1-o1-v1 --report gate-model-00002000.json
+uv run python train.py --preset gomoku-large --data data/larger-model
+uv run python train.py --data data/larger-model --hours 0.25 --workers 2
+uv run python dashboard.py --data data/larger-model --open-browser
 ```
 
-## Saved data
+See [`configs/experiments.toml`](configs/experiments.toml). `--config FILE` selects another file; `--preset NAME` selects a named preset. Explicit CLI flags override the file for a new run. There is no exact-repeat promise or old-checkpoint importer.
 
-New runs create their own `data/<rule-id>/` directory. Actual game records go in **`selfplay/game-*.json`**; the other files support training and resume. Generated artifacts are excluded by `.gitignore`, including custom run directories.
+## Other game presets
 
-| File/directory | Purpose |
+```sh
+# First single-game check: no model updates or saved game records
+uv run python -m engine selfplay --preset tictactoe --games 1 --device cpu
+
+# Request complete native games; summary only, no files of moves
+uv run python -m engine selfplay --preset gomoku --games 10 --model heuristic --device cpu
+
+# Later Connect6 experiment
+uv run python train.py --preset connect6
+uv run python dashboard.py --preset connect6 --open-browser
+```
+
+Boards are square, edge 2..25. `--connect` is 2..the edge. A line of that length **or longer** wins in any of four directions. No forbidden moves or swap opening. Black's first turn and later turns each allow one or two stones. A win stops play at once, including a partial two-stone turn. Different rules use separate default run directories.
+
+## Playing and learning
+
+```text
+C++: rules → tactics and checked proofs → batched PUCT/inference → real terminal games
+Python: recent training samples → model updates → safe checkpoint and frozen models
+C++: updated weights received at safe points → next playing batch
+```
+
+**PUCT** is tree search guided by model move scores and board values. **TSS** is threat-space search: it looks for forced winning plans. Attack discovery is bounded. Independent checking must cover every reply that can block the attack and rule out an earlier opponent win. An unfinished proof means unknown, not loss. Proofs guide moves; training labels come only from actual terminal results.
+
+- C++ inference uses FP32. CUDA learning uses BF16; CPU learning uses FP32.
+- Model updates and generation alternate. Weights do not change during a search batch.
+- Loss is policy cross-entropy plus value mean-square error. Eight square-board rotations/reflections are sampled during learning, not saved eight times.
+- Default: 64 concurrent games, 6 CPU workers, 64 simulations per placement, and optimizer batches of 128. These are separate controls. More workers are not always faster.
+- The active-time goal remains 80% training / 20% evaluation. Evaluation earns one second per four training seconds. With no pending gate, all active time goes to training.
+- Save a frozen model every 1,000 completed games. The first is an initial baseline, not proven strength.
+- Later models play 100 games from 50 paired openings with colors exchanged. Promotion needs score above 50% and full-turn overtime no greater than 0.1 seconds. Draws score 0.5. Default thinking time is 0.25 seconds per full turn.
+- Gates resume and never enter training replay. Frozen weights, rules, and code checks protect each comparison. Use `--restart-gate` only to archive/restart an unfinished gate after changing code or limits.
+
+The dashboard shows run/model details, measured search/inference/learning/save times, loss and gate charts, and summaries for the latest 1,000 completed training games. These summaries have winner, length, turns, and move-source counts—not moves or board histories. Self-play win rates describe data, not strength. Pause training before bot play. Both colors, whole bot turns, and best/latest/frozen model choices are supported. Arrows move keyboard focus; Enter/Space places a stone. Requests stay local and use a same-origin token.
+
+## Storage
+
+| Path inside a run | Purpose |
 | --- | --- |
-| `run.json` | Rules, seed, settings and environment |
-| `latest.pt` | Weights, optimizer, pending exports, unfinished games/work and RNG states; replay restored from recent exports |
-| `models/`, `incumbent.json` | Immutable snapshots, current best and previous best |
-| `selfplay/` | Terminal move records without probabilities |
-| `replay/` | Permanent internal training targets; distinct from the rolling replay window |
-| `metrics/`, `gate-model-*.json`, `gate-archive/` | Loss history, resumable matches and preserved superseded reports |
-| `source-*.zip` | Recorded game/search/training code |
+| `run.json` | Saved rules, model shape, settings, and environment facts |
+| `latest.pt` | Weights, optimizer, bounded replay, active games/proof plans, pending updates/metrics, counters, and RNG state |
+| `selfplay-stats.json` | At most 1,000 game summaries, published after checkpoints |
+| `models/`, `incumbent.json` | Frozen models and the current best |
+| `metrics/`, `gate-model-*.json`, `gate-archive/` | Loss data, resumable evaluation histories, and archived gate reports |
 
-Once a run exists, stored data supports replay, loading existing models and continued training without starting over. Older configurable metadata remains readable. Seeds do not promise bit-identical timed training across runtimes.
+No permanent `selfplay/` move archive, per-game `replay/` exports, or source ZIP is created. Evaluation histories remain for gate checks. Recent replay samples and unfinished games are allowed inside the checkpoint.
 
-The default artifact cap is **20 GiB** (`--disk-gib` adjusts it). Atomic writes reserve the old file, incoming file and a metadata margin. On exhaustion, stop and retain the previous checkpoint; never silently prune. Pending dataset exports are retained in the checkpoint and retried. Software environments/caches are separate.
+Saves are atomic. The default disk cap is 20 GiB. On exhaustion, the previous checkpoint remains; there is no silent pruning. Dropping old samples from the bounded replay window is normal learning behavior, not deletion of existing files. Generated runs and `.native-cache/` are ignored by Git. Deleting them is not reversible through Git.
 
-## Checks and code
+## Checks
 
 ```sh
 uv run python -m unittest discover -s tests -v
 uv run --group browser python tests/ui_smoke.py
+uv run python -m experiments.benchmark_native --device cpu --output .native-cache/checks.json
 ```
 
-Browser checks use installed Chrome, CPU and disposable data directories. Set `CHROME_EXECUTABLE` if needed; no browser is downloaded.
+Browser checks use installed Chrome, CPU, and temporary runs. No browser is downloaded. The [validation report](docs/migration-validation.md) records staged checks and paired search timings. Short tests do **not** establish improved playing strength per training hour.
 
-One package, **`engine/`**, supports both games by changing rules—not switching implementations:
-
-```text
-train.py, dashboard.py          User-facing entry points
-engine/game.py                 Rules and one configurable Game
-engine/network.py, search.py   Policy/value network and batched MCTS
-engine/tactics.py, tss.py       Tactical search and independent proof verification
-engine/selfplay.py             Placement decisions and optimizer updates
-engine/training.py, storage.py  Checkpoints, datasets, milestones and frozen gates
-engine/cli.py, play.py, web.py  CLI and local play/results adapters
-engine/static/                 One dashboard frontend
-```
-
-No legacy-package wrappers, plugin framework or new frontend dependencies. `train.py` and `dashboard.py` commands are unchanged; auxiliary commands now use `python -m engine` instead of `python -m gomoku`.
-
-[Architecture](docs/project-architecture.html) · [Requirements](docs/alignment.md) · [Validation](docs/connection-validation.md) · [Performance](docs/training-performance.md)
-
-The old fixed-rule trainer/UI, duplicate packages and generated historical results are removed. Git history retains the old source; ignored local training data was deliberately deleted and is not recoverable from Git. Curated `tests/fixtures/` positions are regression inputs, not a training dataset. No legacy fixed-format migration is provided.
+Current needs: [approved agreement](docs/migration-requirements.md). Model designs: [survey](docs/model-options.md). [Terms](CONTEXT.md) define the game's shared language. Old reports and the old HTML diagram are marked historical; they are not the current design or current speed results.

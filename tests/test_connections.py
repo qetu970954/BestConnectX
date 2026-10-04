@@ -156,19 +156,19 @@ class EngineTests(unittest.TestCase):
             game.play(heuristic(game))
             self.assertEqual((game.done, game.winner), (True, 1))
 
-    def test_direct_cli_archives_milestones_datasets_and_resumes(self):
+    def test_direct_cli_saves_milestones_bounded_replay_and_resumes(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             save_json(root / 'run.json', {'rules': Rules().id, 'rule_config': Rules().to_dict()})
             command = ['train.py', '--connect', '5', '--board_size', '9*9',
                 '--stones_per_turn', '1', '--starter-stones', '1', '--data', name,
                 '--device', 'cpu', '--hours', '.02', '--parallel', '2', '--batch', '2',
-                '--simulations', '2', '--snapshot-every', '8']
+                '--simulations', '2', '--snapshot-every', '8', '--channels', '4', '--blocks', '1']
             result = cli(*command, '--max-games', '8')
             self.assertEqual(result.returncode, 0, result.stderr)
             first = training.load_state(root / 'latest.pt', Rules())
             self.assertEqual((first['games'], first['step'], first['last_milestone']), (8, 32, 8))
-            self.assertNotIn('replay', load_checkpoint(root / 'latest.pt'))
+            self.assertIn('replay', load_checkpoint(root / 'latest.pt'))
             self.assertTrue(first['replay'])
             self.assertTrue(all(row['board'].numel() == 81 for row in first['replay']))
             torch.manual_seed(first['settings']['seed'])
@@ -182,13 +182,11 @@ class EngineTests(unittest.TestCase):
             best = json.loads((root / 'incumbent.json').read_text())
             self.assertTrue(best['initial_baseline'])
             self.assertEqual(best['file'], 'models/model-00000008.pt')
-            for path in sorted((root / 'selfplay').glob('*.json')):
-                record = json.loads(path.read_text())
-                self.assertTrue(Game.from_moves(record['moves']).done)
-                self.assertTrue(record['complete'])
-                self.assertNotIn('policy', json.dumps(record))
-                data = load_checkpoint(root / 'replay' / (path.stem + '.pt'))
-                self.assertTrue(all('policy' in row and 'result' in row for row in data['samples']))
+            self.assertFalse((root / 'selfplay').exists())
+            self.assertFalse((root / 'replay').exists())
+            self.assertEqual(len(first['summaries']), 8)
+            self.assertTrue(all('moves' not in row and 'board' not in row for row in first['summaries']))
+            self.assertTrue(all('policy' in row and row['result'] in (-1., 0., 1.) for row in first['replay']))
             first['selfplay_counts'] = {'heuristic': 1234}  # Older checkpoint metadata must survive cleanup.
             save_checkpoint(root / 'latest.pt', first, 20 * GIB, root=root)
             result = cli(*command, '--simulations', '7', '--seed', '99', '--max-games', '12')
@@ -198,15 +196,15 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(second['settings'], first['settings'])
             self.assertEqual(second['selfplay_counts'], first['selfplay_counts'])
             self.assertEqual(milestone.read_bytes(), frozen)
-            self.assertEqual(len(list((root / 'selfplay').glob('*.json'))), 12)
-            self.assertEqual(len(list((root / 'replay').glob('*.pt'))), 12)
+            self.assertFalse((root / 'selfplay').exists())
+            self.assertFalse((root / 'replay').exists())
             stats = history(root)['selfplay']
             self.assertEqual((stats['games'], stats['first_game'], stats['last_game']), (12, 1, 12))
             self.assertEqual(stats['black_wins'] + stats['white_wins'] + stats['draws'], 12)
             metric = json.loads(next((root / 'metrics').glob('*.json')).read_text())
             self.assertEqual(len(metric), 32)
             self.assertTrue(all(np.isfinite(row['loss']) for row in metric))
-            self.assertTrue(list(root.glob('source-*.zip')))
+            self.assertFalse(list(root.glob('source-*.zip')))
             original = (root / 'latest.pt').read_bytes()
             result = cli(*command, '--connect', '6', '--max-games', '12')
             self.assertNotEqual(result.returncode, 0)
@@ -245,40 +243,39 @@ class EngineTests(unittest.TestCase):
             self.assertIn('square', result.stderr)
             self.assertEqual((Path(name) / 'latest.pt').read_bytes(), original)
 
-    def test_export_failure_recovers_from_durable_pending_dataset(self):
+    def test_summary_write_failure_recovers_from_durable_checkpoint(self):
         with tempfile.TemporaryDirectory() as name:
             args = SimpleNamespace(data=name, rules=Rules(), disk_gib=20, device='cpu', simulations=2,
-                parallel=2, batch=2, seed=5070, tactical_ms=2, snapshot_every=1000, seconds=5, hours=.02, max_games=8)
-            original = training._immutable_json
-            def disk_full(root, record, value, cap):
-                if record.startswith('selfplay/'):
-                    raise OSError('simulated full disk during export')
-                original(root, record, value, cap)
-            with patch.object(training, '_immutable_json', disk_full):
+                parallel=2, batch=2, seed=5070, tactical_ms=2, snapshot_every=1000, seconds=5, hours=.02,
+                max_games=8, channels=4, blocks=1)
+            original = training.save_json
+            def disk_full(path, value, **kwargs):
+                if path.name == 'selfplay-stats.json' and len(value['summaries']) == 8:
+                    raise OSError('simulated full disk during summary publication')
+                original(path, value, **kwargs)
+            with patch.object(training, 'save_json', disk_full):
                 with self.assertRaises(OSError):
                     training.train(args)
             durable = training.load_state(Path(name) / 'latest.pt')
             self.assertEqual(durable['games'], 8)
-            self.assertEqual(len(durable['pending_games']), 8)
-            expected = [row for item in durable['pending_games'] for row in item['samples']]
+            self.assertEqual(len(durable['summaries']), 8)
+            expected = durable['replay']
             self.assertTrue(expected)
-            def assert_replay(actual):
-                self.assertEqual(len(actual), len(expected))
-                for row, wanted in zip(actual, expected):
-                    self.assertEqual(row.keys(), wanted.keys())
-                    for key, value in wanted.items():
-                        if torch.is_tensor(value):
-                            torch.testing.assert_close(row[key], value, rtol=0, atol=0)
-                        else:
-                            self.assertEqual(row[key], value)
-            assert_replay(durable['replay'])
             with patch.object(training, 'train_step', side_effect=AssertionError('No updates expected')), \
                     patch.object(training, 'selfplay_batch', side_effect=AssertionError('No self-play expected')):
                 training.train(args)
             resumed = training.load_state(Path(name) / 'latest.pt')
-            assert_replay(resumed['replay'])
-            self.assertEqual(len(list((Path(name) / 'selfplay').glob('*.json'))), 8)
-            self.assertEqual(len(list((Path(name) / 'replay').glob('*.pt'))), 8)
+            self.assertEqual(len(resumed['replay']), len(expected))
+            for actual, wanted in zip(resumed['replay'], expected):
+                self.assertEqual(actual.keys(), wanted.keys())
+                for key in wanted:
+                    if torch.is_tensor(wanted[key]):
+                        torch.testing.assert_close(actual[key], wanted[key], rtol=0, atol=0)
+                    else:
+                        self.assertEqual(actual[key], wanted[key])
+            self.assertEqual(history(Path(name))['selfplay']['games'], 8)
+            self.assertFalse((Path(name) / 'selfplay').exists())
+            self.assertFalse((Path(name) / 'replay').exists())
 
     def test_frozen_gate_resumes_100_legal_color_pairs_and_checks_promotion(self):
         device = device_for('cpu')
@@ -394,7 +391,7 @@ class EngineTests(unittest.TestCase):
             root, rules = Path(name), Rules(4, 4, 4)
             net = Network(channels=4, blocks=1, size=4)
             settings = dict(seed=5070, parallel=2, batch=2, simulations=2, bootstrap_games=16,
-                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=.25)
+                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=.25, workers=2)
             for games in (8, 16):
                 save_checkpoint(root / f'models/model-{games:08d}.pt', training.snapshot(net, 0, rules, games),
                                 20 * GIB, root=root)
@@ -524,12 +521,12 @@ class EngineTests(unittest.TestCase):
                 training.restart_gate(root, gate, rules, settings, training._source()[1], 20 * GIB)
             self.assertEqual((root / gate).read_bytes(), unchanged)
 
-    def test_pre_consolidation_checkpoint_resumes_without_old_packages(self):
+    def test_checkpoint_gate_restart_preserves_active_work_and_weights(self):
         with tempfile.TemporaryDirectory() as name:
             root, rules = Path(name), Rules(4, 4, 4)
             net = Network(channels=4, blocks=1, size=4)
             settings = dict(seed=5070, parallel=2, batch=2, simulations=2, bootstrap_games=16,
-                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=5.)
+                updates_per_cycle=32, replay_limit=20_000, tactical_ms=0, snapshot_every=8, gate_seconds=5., workers=2)
             for games in (8, 16):
                 save_checkpoint(root / f'models/model-{games:08d}.pt', training.snapshot(net, 32, rules, games),
                                 20 * GIB, root=root)
@@ -539,7 +536,6 @@ class EngineTests(unittest.TestCase):
             save_json(root / 'run.json', {'rules': rules.id, 'rule_config': rules.to_dict(), 'settings': settings})
             gate = training.next_gate(root, rules, settings, 'before-engine-package', 20 * GIB)
             state = training.snapshot(net, 32, rules, 16)
-            state['config'] = {**state['config'], 'width': 4}  # Older square checkpoints used this field.
             game = Game.from_moves([5], rules=rules)
             policy = np.zeros(16, dtype=np.float32); policy[0] = 1
             sample = {**observation(game, policy), 'result': 1., 'source': 'mcts'}
@@ -653,18 +649,16 @@ class EngineTests(unittest.TestCase):
             self.assertIsNone(empty['mean_placements'])
             self.assertIsNone(empty['black_win_rate'])
             patterns = ([0, 3, 1, 4, 2], [0, 3, 1, 4, 8, 5], [0, 1, 2, 4, 3, 5, 7, 6, 8])
+            summaries = []
             for number in range(1, 1002):
                 index = (number - 1) % 3
                 game = Game.from_moves(patterns[index], rules=rules)
                 self.assertTrue(game.done)
-                save_json(root / 'selfplay' / f'game-{number:09d}.json', {
-                    'game': number, 'rules': rules.id, 'rule_config': rules.to_dict(),
-                    'moves': game.moves, 'winner': game.winner, 'complete': True,
-                    'turns': [{'source': ('mcts', 'heuristic', 'forced')[index]} for _ in game.moves[1:]]})
-            # Incomplete work and evaluation matches must not change the training window.
-            save_json(root / 'selfplay' / 'game-000001002.json', {'complete': False})
+                summaries.append({'game': number, 'placements': len(game.moves), 'winner': game.winner,
+                    'turns': len(game.moves), 'source_counts': {('mcts', 'heuristic', 'forced')[index]: len(game.moves)-1}})
+            save_json(root / 'selfplay-stats.json', {'window': 1000, 'summaries': summaries[-1000:]})
+            # Evaluation matches do not change the training window.
             save_json(root / 'gate-model-00002000.json', {'games': 100, 'wins': 100})
-            (root / 'selfplay' / 'game-000000001.json').touch()  # Modification time is not completion order.
             stats = history(root)['selfplay']
             self.assertEqual((stats['games'], stats['first_game'], stats['last_game']), (1000, 2, 1001))
             self.assertEqual((stats['black_wins'], stats['white_wins'], stats['draws']), (333, 334, 333))
@@ -679,9 +673,8 @@ class EngineTests(unittest.TestCase):
             with patch.object(web, 'load_json', wraps=web.load_json) as reads:
                 self.assertEqual(history(root)['selfplay'], stats)
                 self.assertFalse(any(call.args[0].parent.name == 'selfplay' for call in reads.call_args_list))
-            save_json(root / 'selfplay' / 'game-000001003.json', {
-                'game': 1003, 'rule_config': rules.to_dict(), 'moves': patterns[0],
-                'winner': 1, 'complete': True, 'turns': []})
+            summaries.append({'game': 1003, 'placements': 5, 'winner': 1, 'turns': 5, 'source_counts': {}})
+            save_json(root / 'selfplay-stats.json', {'window': 1000, 'summaries': summaries[-1000:]})
             updated = history(root)['selfplay']
             self.assertEqual((updated['games'], updated['first_game'], updated['last_game']), (1000, 3, 1003))
             self.assertEqual((updated['black_wins'], updated['white_wins'], updated['draws']), (334, 333, 333))
@@ -693,9 +686,8 @@ class EngineTests(unittest.TestCase):
                 data = root / config.id
                 game = Game.from_moves(moves, rules=config)
                 self.assertTrue(game.done)
-                save_json(data / 'selfplay' / 'game-000000001.json', {
-                    'game': 1, 'rule_config': config.to_dict(), 'moves': moves,
-                    'winner': game.winner, 'complete': True, 'turns': []})
+                save_json(data / 'selfplay-stats.json', {'summaries': [{'game': 1, 'placements': len(moves),
+                    'winner': game.winner, 'turns': turns, 'source_counts': {}}]})
                 stats = history(data)['selfplay']
                 self.assertEqual((stats['games'], stats['mean_placements'], stats['mean_turns']), (1, len(moves), turns))
                 self.assertEqual((stats['black_win_rate'], stats['white_win_rate'], stats['draw_rate']),

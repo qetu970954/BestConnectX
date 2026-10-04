@@ -1,4 +1,6 @@
-# Python threat-space search (TSS)
+# Historical Python threat-space search (TSS)
+
+> Python reference retained for tests. This is not the production playing path. Proof rules remain test references; see [native engine](native-engine.md) and [current checks](migration-validation.md).
 
 `engine/tss.py` is the bounded Python reference described in [ADR 0001](adr/0001-python-reference-and-native-search.md). It works with the single configurable `Game`, for both one- and two-stone turns on square boards. It is not evidence of playing strength.
 

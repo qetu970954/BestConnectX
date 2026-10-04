@@ -1,8 +1,10 @@
 ---
-status: accepted
+status: superseded
 ---
 
-# 先建立 Python 參考實作，再移植原生搜尋核心
+# 歷史決策：先建立 Python 參考實作，再移植原生搜尋核心
+
+> 語言／預設／儲存範圍已由[核准移植共識](../migration-requirements.zh-TW.md)取代；正確性、證明完整性及每訓練小時棋力目標仍保留。現行實作見[原生指南](../native-engine.zh-TW.md)。
 
 使用者已確認以下四點。目標是在既有 支援 CUDA 的 GPU 上提高固定訓練時間內的棋力增益，而非單純提高每秒棋局數。先用 Python 建立可驗證的多回合 TSS 與完整整合，再根據效能分析移植 CPU 密集部分；不必等神經網路練強才開始移植。
 

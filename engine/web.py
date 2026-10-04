@@ -9,7 +9,7 @@ import secrets
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from .game import DEFAULT_RULES, Game, Rules
+from .runtime import DEFAULT_RULES, Game, Rules
 from .storage import busy, load_json, save_json, usage
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,23 +23,16 @@ class _DashboardServer(HTTPServer):
 
 
 @lru_cache(maxsize=1)
-def _selfplay_stats(paths):
-    """Summarize immutable terminal exports; unfinished and evaluation games stay out."""
-    records = []
-    for path in reversed(paths):
-        record = load_json(path, {})
-        if record.get("complete") is True:
-            records.append(record)
-            if len(records) == 1000:
-                break
+def _selfplay_stats(content):
+    """Summarize checkpoint-published rows, without reading any move histories."""
+    records = list(reversed(json.loads(content).get('summaries', [])[-1000:]))
     count = len(records)
-    lengths = [len(row["moves"]) for row in records]
-    turns = []
-    for row, length in zip(records, lengths):
-        rules = Rules(**row["rule_config"])
-        turns.append(1 + max(0, math.ceil((length - rules.starter_stones) / rules.stones_per_turn)))
-    wins = Counter(row["winner"] for row in records)
-    sources = Counter(turn["source"] for row in records for turn in row.get("turns", []))
+    lengths = [row['placements'] for row in records]
+    turns = [row['turns'] for row in records]
+    wins = Counter(row['winner'] for row in records)
+    sources = Counter()
+    for row in records:
+        sources.update(row.get('source_counts', {}))
     return {"window": 1000, "games": count,
         "first_game": records[-1]["game"] if count else None,
         "last_game": records[0]["game"] if count else None,
@@ -71,8 +64,7 @@ def history(data):
             "score": report.get("score"), "win_rate": report.get("win_rate")})
     models = [{"file": p.name, "games": int(p.stem.rsplit("-", 1)[-1])}
               for p in sorted((data / "models").glob("model-*.pt"))]
-    # ponytail: scan archive names, but cache unchanged immutable records; index only if scans become slow.
-    selfplay = _selfplay_stats(tuple(sorted((data / "selfplay").glob("game-*.json"))))
+    selfplay = _selfplay_stats(json.dumps(load_json(data / 'selfplay-stats.json', {'summaries': []})))
     return {"metrics": rows, "gates": gates, "models": models, "selfplay": selfplay}
 
 
@@ -127,7 +119,9 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                 status["game"] = {"board": game.board.tolist(), "player": game.player,
                     "left": game.left, "done": game.done, "winner": game.winner,
                     "moves": game.moves, "human": human, "size": game.size}
-                status["rule_config"] = rules.to_dict()
+                status['rule_config'] = rules.to_dict()
+                status['network'] = (load_json(data / 'run.json', {}).get('network') or status.get('network'))
+                status['backend'] = 'cpp-libtorch'
                 status["candidate_available"] = (data / "latest.pt").is_file()
                 status["data_directory"] = data.as_posix()
                 return self.send(200, status)

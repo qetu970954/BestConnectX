@@ -1,30 +1,28 @@
-"""Training lifecycle: terminal self-play, durable datasets, milestones, and frozen gates.
+"""Training lifecycle: native terminal self-play, bounded replay, milestones, and frozen gates.
 
 The game engine has no training dependency. The dashboard reads the JSON artifacts.
 """
 import hashlib
-import io
 import json
 from pathlib import Path
 import platform
 import signal
 import sys
 import time
-import zipfile
 import numpy as np
 import torch
 from .network import Network, device_for
-from .search import choose
 from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
                       save_checkpoint, save_json, unlink, usage)
-from .selfplay import selfplay_batch, selfplay_samples, train_step, turn_action
-from .game import DEFAULT_RULES, Game, Rules
+from .selfplay import selfplay_samples, train_step
+from .runtime import DEFAULT_RULES, Game, Rules, selfplay_batch, turn_action, model_for, opening as native_opening, backend as native_backend
 from . import native
 
 GATE_GAMES = 100
 SOURCE_FILES = ["engine/game.py", "engine/training.py", "engine/network.py", "engine/search.py",
                 "engine/selfplay.py", "engine/tactics.py", "engine/tss.py", "engine/storage.py",
-                "engine/native.py", "engine/native.cpp"]
+                "engine/native.py", "engine/native.cpp", "engine/runtime.py", "engine/runtime.cpp",
+                "engine/runtime.h", "engine/inference.cpp", "engine/config.py"]
 PROJECT = Path(__file__).resolve().parent.parent
 
 
@@ -40,43 +38,25 @@ def digest(path):
 
 
 def _replay_window(root, state):
-    """Read only the recent window, including games saved before an interrupted export."""
-    limit = state["settings"].get("replay_limit", 20_000)
-    pending = state.get("pending_games", [])
-    exported = {f"game-{item['record']['game']:09d}.pt" for item in pending}
-    chunks, count = [], 0
-    for item in reversed(pending):
-        chunks.append(item["samples"])
-        count += len(chunks[-1])
-        if count >= limit:
-            break
-    if count < limit:
-        for path in sorted((root / "replay").glob("game-*.pt"), reverse=True):
-            if path.name in exported:
-                continue
-            chunks.append(load_checkpoint(path).get("samples", []))
-            count += len(chunks[-1])
-            if count >= limit:
-                break
-    return [row for chunk in reversed(chunks) for row in chunk][-limit:]
+    """Replay is checkpoint-owned; never rebuild it by scanning game archives."""
+    return state.get('replay', [])[-state['settings'].get('replay_limit', 20_000):]
 
 
 def load_state(path, rules=None, *, restore_replay=True):
     state = load_checkpoint(path)
     recorded = Rules(**state["rule_config"]) if "rule_config" in state else None
-    if (state.get("format") != 1 or recorded is None or state.get("rules") != recorded.id
+    if (state.get("format") != 2 or recorded is None or state.get("rules") != recorded.id
             or state["config"]["size"] != recorded.height
             or state["config"].get("width", state["config"]["size"]) != recorded.width
             or (rules is not None and rules != recorded)):
         raise ValueError("Checkpoint rules do not match this run. Use a separate --data directory.")
-    state["config"].pop("width", None)  # Old square prototypes stored a redundant width.
     if restore_replay and "replay" not in state and "active" in state:
         state["replay"] = _replay_window(Path(path).parent, state)
     return state
 
 
 def snapshot(net, step, rules=DEFAULT_RULES, games=0):
-    return {"format": 1, "config": net.config, "step": step,
+    return {"format": 2, "config": net.config, "step": step,
             "weights": {k: v.detach().cpu() for k, v in net.state_dict().items()},
             "rules": rules.id, "rule_config": rules.to_dict(), "games": games}
 
@@ -105,19 +85,11 @@ def _source():
 
 
 def _environment(root, cap):
-    payloads, sha = _source()
-    archive = root / f"source-{sha[:16]}.zip"
-    if not archive.exists():
-        stream = io.BytesIO()
-        with zipfile.ZipFile(stream, "w", zipfile.ZIP_DEFLATED) as zipped:
-            for name, value in payloads.items():
-                zipped.writestr(name, value)
-        atomic_bytes(archive, stream.getvalue(), cap, root=root)
-    return {"python": sys.version, "platform": platform.platform(), "torch": str(torch.__version__),
-            "numpy": np.__version__, "cuda_build": torch.version.cuda, "code_sha256": sha,
-            "source_archive": archive.name,
-            "native_backend": {"kind": "cpp", "binary_sha256": digest(native.library_path())}
-                if native.library() is not None else {"kind": "python"}}
+    native_backend()  # Refuse a production run without the native engine.
+    _, sha = _source()
+    return {'python': sys.version, 'platform': platform.platform(), 'torch': str(torch.__version__),
+            'numpy': np.__version__, 'cuda_build': torch.version.cuda, 'code_sha256': sha,
+            'native_backend': {'kind': 'cpp-libtorch', 'binary_sha256': digest(native.library_path())}}
 
 
 def _immutable_json(root, name, value, cap):
@@ -130,50 +102,21 @@ def _immutable_json(root, name, value, cap):
 
 
 def _flush_exports(root, games, metrics, rules, cap):
-    # Checkpoint first, export second. Interrupted exports are idempotently retried on resume.
-    for item in games:
-        stem = f"game-{item['record']['game']:09d}"
-        _immutable_json(root, f"selfplay/{stem}.json", item["record"], cap)
-        replay_path = root / "replay" / f"{stem}.pt"
-        if not replay_path.exists():
-            save_checkpoint(replay_path, {"rules": rules.id, "rule_config": rules.to_dict(),
-                            "game": item["record"]["game"], "samples": item["samples"]}, cap, root=root)
+    # Checkpoint first. Summary/metric writes can be retried after an interrupted save.
+    save_json(root / 'selfplay-stats.json', {'window': 1000, 'summaries': games[-1000:]}, root=root, cap=cap)
     if metrics:
         name = f"metrics/updates-{metrics[0]['step']:09d}-{metrics[-1]['step']:09d}.json"
         _immutable_json(root, name, metrics, cap)
-    games.clear()
     metrics.clear()
 
 
 def _new_game(rules, rng):
-    game = Game(rules=rules)
-    if rng.random() < .5:
-        height, width = game.shape
-        pool = [r * width + c for r in range(max(0, height // 2 - 1), min(height, height // 2 + 2))
-                for c in range(max(0, width // 2 - 1), min(width, width // 2 + 2))]
-        for move in rng.choice(pool, rules.starter_stones, replace=False):
-            game.play(int(move))
-            if game.done:
-                return Game(rules=rules)
-    return game
+    return native_opening(0, int(rng.integers(0, 2**63)), rules, random_start=True)
 
 
 def opening(index, seed, rules=DEFAULT_RULES):
     """Legal, held-out starts. A pair shares the start; engine colors, not stones, swap."""
-    rng = np.random.default_rng(seed + index)
-    for _ in range(20):
-        game = Game(rules=rules)
-        count = min(rules.starter_stones + 2 * rules.stones_per_turn, game.board.size - 1)
-        pool = np.arange(game.board.size)
-        center = (rules.height // 2) * rules.width + rules.width // 2
-        moves = [center, *rng.choice(pool[pool != center], count - 1, replace=False).tolist()]
-        for move in moves:
-            game.play(int(move))
-            if game.done:
-                break
-        if not game.done:
-            return game
-    return Game(rules=rules)  # Tiny games can have no live opening of the requested length.
+    return native_opening(index, seed, rules)
 
 
 def gate_summary(report):
@@ -364,13 +307,19 @@ def _train(args, root, rules):
     cap = int(args.disk_gib * GIB)
     settings = saved["settings"].copy() if saved else {
         "simulations": args.simulations, "parallel": args.parallel or 64, "batch": args.batch, "seed": args.seed,
-        "bootstrap_games": 16, "updates_per_cycle": 32, "replay_limit": 20_000,
+        'bootstrap_games': getattr(args, 'bootstrap_games', 16),
+        'updates_per_cycle': getattr(args, 'updates_per_cycle', 32),
+        'replay_limit': getattr(args, 'replay_limit', 20_000),
+        'learning_rate': getattr(args, 'learning_rate', .001), 'workers': getattr(args, 'workers', None) or 6,
         "tactical_ms": args.tactical_ms, "snapshot_every": args.snapshot_every,
         "gate_seconds": args.seconds if args.seconds is not None else .25}
     gate = saved.get("gate") if saved else None
     restart = getattr(args, "restart_gate", False)
-    if args.parallel is not None:
-        settings["parallel"] = args.parallel
+    explicit = getattr(args, 'explicit', {'parallel', 'workers', 'seconds'})
+    if args.parallel is not None and (not saved or 'parallel' in explicit):
+        settings['parallel'] = args.parallel
+    if getattr(args, 'workers', None) is not None and (not saved or 'workers' in explicit):
+        settings['workers'] = args.workers
     if args.seconds is not None:
         if gate and not restart and args.seconds != load_json(root / gate)["seconds_per_turn"]:
             raise ValueError("Changing a pending gate's time requires --restart-gate; old results will be archived.")
@@ -389,13 +338,14 @@ def _train(args, root, rules):
     device = device_for(args.device)
     torch.manual_seed(settings["seed"])
     rng = np.random.default_rng(settings["seed"])
-    config = saved["config"] if saved else {"size": rules.height, "channels": 32, "blocks": 2}
+    config = saved['config'] if saved else {'size': rules.height, 'channels': getattr(args, 'channels', 64), 'blocks': getattr(args, 'blocks', 6)}
     net = Network(**config).to(device)
-    optimizer = torch.optim.AdamW(net.parameters(), lr=.001, weight_decay=.0001)
+    optimizer = torch.optim.AdamW(net.parameters(), lr=settings.get('learning_rate', .001), weight_decay=.0001)
     games = steps = since_update = last_milestone = 0
     replay, active = [], []
-    pending_games, pending_metrics = [], []
+    summaries, pending_metrics = [], []
     loss_metrics = None
+    timings = {'cpu_search_seconds': 0., 'inference_seconds': 0., 'learning_seconds': 0., 'checkpoint_seconds': 0.}
     phase_seconds = saved.get("phase_seconds", {"training": 0., "evaluation": 0.}) if saved else {"training": 0., "evaluation": 0.}
     if saved:
         net.load_state_dict(saved["weights"])
@@ -408,9 +358,10 @@ def _train(args, root, rules):
         replay = saved["replay"] if "replay" in saved else _replay_window(root, saved)
         active = saved["active"]
         last_milestone, gate = saved["last_milestone"], saved["gate"]
-        pending_games, pending_metrics = saved["pending_games"], saved["pending_metrics"]
-        loss_metrics = saved["loss_metrics"]
-        _flush_exports(root, pending_games, pending_metrics, rules, cap)
+        summaries, pending_metrics = saved.get('summaries', []), saved['pending_metrics']
+        loss_metrics = saved['loss_metrics']
+        timings.update(saved.get('timings', {}))
+        _flush_exports(root, summaries, pending_metrics, rules, cap)
     boards = [Game.from_moves(row["moves"], rules=rules) for row in active]
     if not run_info or run_info.get("settings") != settings:
         save_json(root / "run.json", {"rules": rules.id, "rule_config": rules.to_dict(),
@@ -432,16 +383,16 @@ def _train(args, root, rules):
 
     def checkpoint():
         state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
-        if saved is not None and "replay" in saved:
-            # Legacy replay may have no dataset export; retain it, with current samples.
-            state["replay"] = replay
-        state.update(optimizer=optimizer.state_dict(), settings=settings, since_update=since_update,
+        begin = time.perf_counter()
+        state.update(replay=replay, summaries=summaries, timings=timings,
+            optimizer=optimizer.state_dict(), settings=settings, since_update=since_update,
             active=active, last_milestone=last_milestone, gate=gate, phase_seconds=phase_seconds,
-            pending_games=pending_games, pending_metrics=pending_metrics, loss_metrics=loss_metrics,
+            pending_metrics=pending_metrics, loss_metrics=loss_metrics,
             environment=environment, rng=rng.bit_generator.state,
             torch_rng=torch.get_rng_state(), cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else None)
         save_checkpoint(root / "latest.pt", state, cap, root=root)
-        _flush_exports(root, pending_games, pending_metrics, rules, cap)
+        _flush_exports(root, summaries, pending_metrics, rules, cap)
+        timings['checkpoint_seconds'] += time.perf_counter() - begin
 
     def status(phase, message="Training is CLI-controlled."):
         nonlocal last_status
@@ -453,7 +404,8 @@ def _train(args, root, rules):
             "games": games, "updates": steps, "replay_positions": len(replay), "loss_metrics": loss_metrics,
             "next_milestone": last_milestone + settings["snapshot_every"], "phase_seconds": phase_seconds.copy(),
             "evaluation_share": phase_seconds["evaluation"] / max(1e-9, sum(phase_seconds.values())),
-            "parallel": settings["parallel"],
+            'parallel': settings['parallel'], 'workers': settings['workers'], 'network': net.config,
+            'timings': timings.copy(), 'backend': 'cpp-libtorch',
             "session_seconds": round(now - start, 1), "remaining_seconds": round(max(0, deadline - now), 1),
             "artifact_bytes": usage(root), "cap_bytes": cap, "updated_at": time.time()}
         # Atomic writers reserve 1 MiB for status/recovery metadata, even when the artifact cap is reached.
@@ -504,8 +456,9 @@ def _train(args, root, rules):
                 pending = settings.get("pending_updates", settings["updates_per_cycle"] * max(1, (since_update + 7) // 8))
                 while pending and not stopped():
                     metric = {}
-                    train_step(net, optimizer, replay, settings["batch"], rng, device,
-                        rules=rules, metrics=metric)
+                    learn_started = time.perf_counter()
+                    train_step(net, optimizer, replay, settings['batch'], rng, device, rules=rules, metrics=metric)
+                    timings['learning_seconds'] += time.perf_counter() - learn_started
                     steps += 1
                     pending -= 1
                     settings["pending_updates"] = pending
@@ -524,8 +477,8 @@ def _train(args, root, rules):
             else:
                 while len(active) < settings["parallel"]:
                     game = _new_game(rules, rng)
-                    active.append({"moves": game.moves, "opening": game.moves.copy(), "samples": [],
-                                   "turns": [], "strategies": [None, None], "plans": [[], []]})
+                    active.append({'moves': game.moves, 'samples': [], 'source_counts': {},
+                                   'strategies': [None, None], 'plans': [[], []]})
                     boards.append(game)
                 batch_boards = boards[:settings["parallel"]]
                 slots = [0 if game.player == 1 else 1 for game in batch_boards]
@@ -533,10 +486,12 @@ def _train(args, root, rules):
                 plans = [list(row["plans"][slot]) for row, slot in zip(active, slots)]
                 decisions = selfplay_batch(batch_boards, net, settings["simulations"], rng,
                     bootstrap=games < settings["bootstrap_games"], tactical_ms=settings["tactical_ms"],
-                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans)
+                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans, workers=settings['workers'])
                 if decisions is None or stopped():
                     phase_seconds[phase] += time.monotonic() - began
                     break
+                for key, value in model_for(net).timings.items():
+                    timings[key] += value
                 ceiling = last_milestone + settings["snapshot_every"]
                 if args.max_games:
                     ceiling = min(ceiling, args.max_games)
@@ -547,10 +502,10 @@ def _train(args, root, rules):
                         survivors.append(row)
                         live.append(game)
                         continue
-                    action = choose(decision["policy"], rng, temperature=1 if len(game.moves) < 12 else .25)
-                    source = decision["source"]
-                    row["samples"].extend(selfplay_samples(game, decision))
-                    row["turns"].append({"move": action, "step": steps, "source": source})
+                    action = decision['action']
+                    source = decision['source']
+                    row['samples'].extend(selfplay_samples(game, decision))
+                    row['source_counts'][source] = row['source_counts'].get(source, 0) + 1
                     row["strategies"][slot] = strategy
                     row["plans"][slot] = plan[1:] if plan and plan[0] == action else []
                     game.play(action)
@@ -562,11 +517,11 @@ def _train(args, root, rules):
                         replay = replay[-settings["replay_limit"]:]
                         games += 1
                         since_update += 1
-                        record = {"rules": rules.id, "rule_config": rules.to_dict(), "game": games,
-                            "seed": settings["seed"], "opening": row["opening"], "moves": game.moves,
-                            "winner": game.winner, "complete": True, "turns": row["turns"],
-                            "code_sha256": environment["code_sha256"]}
-                        pending_games.append({"record": record, "samples": row["samples"]})
+                        length = len(game.moves)
+                        turns = 1 + max(0, (length-rules.starter_stones+rules.stones_per_turn-1)//rules.stones_per_turn)
+                        summaries.append({'game': games, 'winner': game.winner, 'placements': length,
+                                          'turns': turns, 'source_counts': row['source_counts']})
+                        summaries = summaries[-1000:]
                     else:
                         survivors.append(row)
                         live.append(game)

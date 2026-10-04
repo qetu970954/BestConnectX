@@ -114,7 +114,10 @@ def selfplay_samples(game, decision):
 @lru_cache(maxsize=20_000)
 def _replay_features(board, dtype, player, left, rules):
     # Bound the runtime cache to the default replay window; do not serialize it.
-    game = Game(np.frombuffer(board, dtype=dtype), player, left, rules=rules)
+    from . import native
+    from .runtime import Game as NativeGame
+    implementation = NativeGame if native.library() is not None else Game  # Reference-only fallback for tests.
+    game = implementation(np.frombuffer(board, dtype=dtype), player, left, rules=rules)
     return game.features().astype(np.uint8)
 
 
@@ -147,6 +150,7 @@ def train_step(net, optimizer, replay, batch_size, rng, device, *, rules=DEFAULT
     loss.backward()
     torch.nn.utils.clip_grad_norm_(net.parameters(), 5, error_if_nonfinite=True)
     optimizer.step()
+    net._native_dirty = True
     if metrics is not None:
         metrics.update(loss=float(loss.detach()), policy_loss=float(policy_loss.detach()),
                        value_loss=float(value_loss.detach()))

@@ -1,4 +1,6 @@
-# Training performance
+# Historical training performance
+
+> Historical Python-engine report. Archive layout, defaults, and next steps below are not the current design. See [native engine](native-engine.md) and [current checks/timings](migration-validation.md).
 
 **The framework runs on CUDA; optimal settings and playing strength are not established.** Optimize strength gained per training hour, not GPU utilization alone. See [validation](connection-validation.md) and the [project diagram](project-architecture.html).
 
