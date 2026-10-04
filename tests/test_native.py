@@ -74,6 +74,20 @@ class NativeTests(unittest.TestCase):
             native.features(np.zeros((1, 4), dtype=np.int8), np.ones(1, dtype=np.int32),
                             np.ones(1, dtype=np.int32), np.array([[0, 4]], dtype=np.int32), 1)
 
+    def test_native_search_uses_bulk_traversal_not_scalar_ctypes_calls(self):
+        class Uniform:
+            def evaluate(self, games):
+                return (np.zeros((len(games), games[0].board.size), dtype=np.float32),
+                        np.full(len(games), .375, dtype=np.float32))
+        rules = Rules(3, 3, 3)
+        games = [opening(i, 123456, rules) for i in range(4)]
+        with patch('engine.native.select', side_effect=AssertionError('per-node ctypes call')):
+            policies, count = search(games, Uniform(), 64)
+        self.assertEqual(count, 64)
+        for game, policy in zip(games, policies):
+            self.assertAlmostEqual(float(policy.sum()), 1)
+            self.assertFalse(np.any(policy[game.board != 0]))
+
     def test_actual_search_policies_and_backups_are_identical(self):
         torch.set_num_threads(2)
         torch.manual_seed(5070)

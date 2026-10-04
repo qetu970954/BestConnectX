@@ -16,7 +16,7 @@ import torch
 from .network import Network, device_for
 from .search import choose
 from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
-                      save_checkpoint, save_json, usage)
+                      save_checkpoint, save_json, unlink, usage)
 from .selfplay import selfplay_batch, selfplay_samples, train_step, turn_action
 from .game import DEFAULT_RULES, Game, Rules
 from . import native
@@ -419,7 +419,7 @@ def _train(args, root, rules):
         save_json(root / "incumbent.json", {"kind": "heuristic", "rules": rules.id,
             "label": "No milestone model yet; untrained heuristic for preview"}, root=root, cap=cap)
     stop_file = root / "stop"
-    stop_file.unlink(missing_ok=True)
+    unlink(stop_file, missing_ok=True)
     interrupted = [False]
     old_signals = {}
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -598,7 +598,7 @@ def evaluate(args):
         old = signal.signal(signal.SIGINT, lambda *_: interrupted.__setitem__(0, True))
         deadline = time.monotonic() + args.hours * 3600
         stop = root / "stop"
-        stop.unlink(missing_ok=True)
+        unlink(stop, missing_ok=True)
         stopped = lambda: interrupted[0] or stop.exists() or time.monotonic() >= deadline
         try:
             report = run_gate(root, args.report, rules, device_for(args.device), deadline,
