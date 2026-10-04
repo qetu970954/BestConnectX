@@ -11,12 +11,16 @@ GIB = 1024 ** 3
 
 def usage(root):
     total = 0
-    for path in Path(root).rglob("*"):
-        try:
-            if path.is_file():
-                total += path.stat().st_size
-        except FileNotFoundError:
-            pass  # Atomic writes can replace temporary files while usage is measured.
+    root_path = Path(root)
+    try:
+        with os.scandir(root_path) as it:
+            for entry in it:
+                if entry.is_file(follow_symlinks=False):
+                    total += entry.stat().st_size
+                elif entry.is_dir(follow_symlinks=False):
+                    total += usage(entry.path)
+    except FileNotFoundError:
+        pass  # Atomic writes can replace temporary files while usage is measured.
     return total
 
 

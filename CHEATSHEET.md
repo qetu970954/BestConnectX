@@ -53,7 +53,7 @@ uv run python -m engine stop --data data/connect6-19x19-s2-o1-v1
 
 - **Stop:** Ctrl+C or the `stop` command. Wait for the checkpoint save before closing the terminal.
 - **Resume:** repeat the original training command. No `--restart-gate` for a fresh start or normal resume.
-- **Browser:** http://127.0.0.1:8765. It displays saved progress and results; it does not start training. Pause training/evaluation before bot play.
+- **Browser:** http://127.0.0.1:8765. It displays progress, loss/gate charts and statistics for the latest 1,000 saved self-play games (lengths, black/white wins, draws and decision sources). Statistics update after checkpoints; they do not measure strength. The browser does not start training. Pause training/evaluation before bot play.
 - **Separate experiment:** append `--data data/my-run` to both training and dashboard commands, keeping the same rule flags.
 - **Square boards only:** quote `"9*9"` / `"19*19"`; rectangles such as `"9*13"` are rejected.
 
@@ -99,7 +99,7 @@ Inside each run:
 | --- | --- |
 | `selfplay/game-*.json` | Actual terminal moves, without policy probabilities |
 | `replay/game-*.pt` | Internal training targets |
-| `latest.pt` | Weights, optimizer, replay, unfinished games and RNG state |
+| `latest.pt` | Weights, optimizer, pending exports/work, unfinished games and RNG state; fresh runs restore replay from recent `replay/` exports |
 | `models/model-*.pt` | Immutable model snapshots |
 | `incumbent.json` | Current best and previous best references |
 | `run.json` | Rules, seed, settings and environment |

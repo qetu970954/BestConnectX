@@ -2,7 +2,7 @@
 
 Original AlphaZero-style self-play + verified TSS for **square-board connection games**. Train from the CLI; play and inspect results in the browser.
 
-**Status:** Fresh framework, with no saved runs, games or trained models. Existing local data and generated reports were cleared at the user's request. CPU tests validate the pipeline—not playing strength. No real training or GPU job was started for this cleanup.
+**Status:** CUDA training, persistence, safe stop/resume and a complete 9×9 model comparison have been exercised. This validates the framework—not playing strength or optimal settings. Local games/models are generated artifacts, not shipped weights. Start with the [project architecture diagram](docs/project-architecture.html) and [validation results](docs/connection-validation.md).
 
 ## Start
 
@@ -20,6 +20,20 @@ uv run python dashboard.py --open-browser
 ```
 
 Windows: `start.cmd` opens the dashboard. Default URL: **http://127.0.0.1:8765**.
+With `--data PATH`, the dashboard automatically loads that run's saved rules.
+Only one dashboard can own a port: close the old dashboard with Ctrl+C, or use `--port 8766` for another run.
+
+Optional CPU acceleration (C++17 compiler required):
+
+```sh
+uv run python -m engine.native
+```
+
+This builds original feature and search-selection kernels in `.native-cache/`.
+They are already built on this machine and load automatically. Other machines
+use the Python backend until built; rebuild after editing `engine/native.cpp`.
+Set `BESTCONNECT6_NATIVE=0` before starting Python to select the reference backend.
+See [measured speedups and bottlenecks](docs/training-performance.md).
 
 - Boards are **N×N**, N = 2..25; `9*13` is rejected. Quote the `*` in shell commands.
 - `--connect` is 2..N; a run of this length or longer wins horizontally, vertically or diagonally. No forbidden moves or swap opening.
@@ -39,6 +53,19 @@ uv run python dashboard.py --data data/connect6-19x19-s2-o1-v1 --open-browser
 Seed and learning settings are fixed at run creation; resume uses the saved settings. `--parallel N` explicitly changes self-play concurrency on resume without dropping unfinished games. `--seconds` sets future gate limits; changing a pending gate requires `--restart-gate`. Session duration, device and disk cap may change. `--device auto` selects CUDA when available; use `--device cpu` for checks. These are user-started commands, not authorization for agent-run GPU work.
 
 The browser has **no training controls**. Pause CLI work before bot play. It supports either color, complete bot turns, latest/best/milestone model selection, loss curves and candidate win-rate/score charts. Keyboard: arrows navigate; Enter/Space places a stone. Requests stay local and mutations require a same-origin token.
+
+### Rolling self-play statistics
+
+The dashboard summarizes the **latest 1,000 saved, completed training games**, ordered by completion number. With fewer games, it uses all available records. It shows:
+
+- Mean stone placements and mean turns, plus median, shortest and longest game lengths.
+- Black wins, white wins and draws, with counts and rates. All games, including draws, are in each rate's denominator.
+- The number of games and their completion-number range.
+- Decision-source counts and percentages: MCTS, heuristic, single-candidate and verified proof/TSS placements. Preset opening stones are excluded from these source counts.
+
+Game length includes the opening. One player's turn counts as one turn; a final partial turn also counts. Evaluation games and augmented replay samples are excluded.
+
+Statistics use existing `selfplay/game-*.json` records and update after dataset exports at checkpoints, not after each live placement. The browser polls every two seconds. No extra training writes or checkpoint changes are needed. Older records stay saved; the 1,000-game window does not delete them. These rates describe training data, **not model strength**.
 
 ## Learning and model replacement
 
@@ -70,7 +97,7 @@ New runs create their own `data/<rule-id>/` directory. Actual game records go in
 | File/directory | Purpose |
 | --- | --- |
 | `run.json` | Rules, seed, settings and environment |
-| `latest.pt` | Weights, optimizer, replay, unfinished games/work and RNG states |
+| `latest.pt` | Weights, optimizer, pending exports, unfinished games/work and RNG states; replay restored from recent exports |
 | `models/`, `incumbent.json` | Immutable snapshots, current best and previous best |
 | `selfplay/` | Terminal move records without probabilities |
 | `replay/` | Permanent internal training targets; distinct from the rolling replay window |
@@ -105,6 +132,6 @@ engine/static/                 One dashboard frontend
 
 No legacy-package wrappers, plugin framework or new frontend dependencies. `train.py` and `dashboard.py` commands are unchanged; auxiliary commands now use `python -m engine` instead of `python -m gomoku`.
 
-[Requirements](docs/alignment.md) · [Validation](docs/connection-validation.md) · [Recent arXiv research](docs/training-research.md)
+[Architecture](docs/project-architecture.html) · [Requirements](docs/alignment.md) · [Validation](docs/connection-validation.md) · [Performance](docs/training-performance.md)
 
 The old fixed-rule trainer/UI, duplicate packages and generated historical results are removed. Git history retains the old source; ignored local training data was deliberately deleted and is not recoverable from Git. Curated `tests/fixtures/` positions are regression inputs, not a training dataset. No legacy fixed-format migration is provided.

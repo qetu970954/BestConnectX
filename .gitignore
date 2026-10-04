@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+.native-cache/
 
 # Generated runs, including custom --data directories
 data/

@@ -1,42 +1,33 @@
-# Fresh framework validation
+# Validation
 
-CPU-only checks use `CUDA_VISIBLE_DEVICES=''` and disposable directories. **All 49 unit tests and the browser smoke check passed after cleanup.** They validate framework behavior, not a trained bot's strength. No real training or GPU job was started for this cleanup.
+Framework checks establish operation and recovery, not playing strength or optimal settings. Architecture and commands are in the [project diagram](project-architecture.html) and [README](../README.md).
 
-## Regression checks
+## CPU and browser, 2026-10-04
+
+- **C++ enabled:** 59 CPU tests passed (29.365 seconds).
+- **Python fallback:** 59 discovered; 56 passed, three native-only checks skipped (28.817 seconds).
+- **Browser:** 3×3, 9×9, 13×13 and 19×19 passed with browser GPU acceleration disabled. The 3×3 check read the active user's dashboard without bot/training requests; other boards used disposable CPU runs.
+
+Coverage includes rules/turns/overlines; eight board-policy symmetries; terminal labels; batched inference; native/reference agreement; proof validation and cancellation; checkpoints/RNG/replay/export recovery; disk limits; immutable models; complete paired gates; promotion/rejection safeguards; persisted 80/20 scheduling; and concurrency changes without lost unfinished games.
+
+The statistics check selects the latest 1,000 completed records by completion number, excludes unfinished/evaluation games, checks color/draw denominators and partial turns, and verifies cache invalidation on new exports. Real CLI resume and browser checks cover saved-window counts, distinct placement/turn lengths, empty states and keyboard-accessible details.
+
+The dashboard fits 1920×1080 and 1920×960 without page scrolling; mobile/keyboard play, charts, model selection, local tokens and run locking passed. No browser training endpoints exist. A regression check verifies saved 3×3 rules, rejection of a second dashboard on an occupied port, and immediate restart after closing the first. Windows address reuse previously let an old dashboard silently share the new run's URL.
+
+## CUDA evidence
+
+- Temporary 19×19 test: 64 terminal games, 288 finite updates, four immutable models and exact recovery of 20,000 replay positions. Startup restored weights, counters and NumPy/CPU/CUDA RNG states.
+- Its comparison resumed to 42/100 games. GPU processes used 177.014 seconds; total harness attempts used 191.668 seconds under the separate 300-second grant. Temporary data was removed. Test-only 16-game snapshots and mostly bootstrap samples prevent throughput/strength conclusions.
+- The original end-of-session CPU-RNG assertion was invalid: frozen-network initialization consumes CPU RNG. Startup restoration passed without an engine change.
+- A subsequent normal **9×9 CUDA run** stopped safely at **3,004 games / 15,936 updates**, with 20,000 replay positions. Its 2,000-game candidate completed a 100-game gate, scored 47%, and was not promoted. The 3,000-game candidate paused at 3/100 games. Actual GPU rejection is verified; accepted promotion remains CPU-tested, not exercised by this run.
+
+Local raw receipts are in `.native-cache/framework-readiness-results.json` and `data/connect5-9x9-s1-o1-v1/`. They are ignored and not shipped. Historical reports are cached in `.native-cache/docs-archive/`. Long-session stability and external playing strength remain unmeasured; see [performance](training-performance.md).
+
+## Run checks
 
 ```sh
 uv run python -m unittest discover -s tests -v
-```
-
-The suite covers:
-
-- One configurable `Game`: 9×9 Gomoku, 13×13 and 19×19 Connect6-style rules, square-only validation, both opening/turn sizes, overlines and immediate termination.
-- Matching board/policy transforms for all eight square symmetries, finite losses and actual CPU optimizer updates in temporary tests.
-- Batched unresolved-root inference, exact tactical plans, independent TSS verification, malformed-proof rejection, cancellation and plan continuation.
-- Actual terminal self-play; no proof adjudication or premature value labels.
-- Checkpoint/resume, immutable milestones, move-only public records, internal replay targets, persisted RNG and recovery from interrupted exports.
-- Frozen 100-game paired gates, terminal-history verification, tie retention, promotion safeguards and previous-best publication.
-- Persisted 80/20 time accounting, concurrent training with pending gates and explicit concurrency changes without dropping games.
-- Whole-turn overtime across a pause between stones: 0.31 + 0.06 seconds against 0.25 records the full 0.12-second overrun.
-- Slow-loading gate progress, reuse of frozen networks, continued checksum enforcement and inclusion of setup time in evaluation credit.
-- Pre-consolidation configurable checkpoint compatibility without either old package; explicit gate restart preserves archived report bytes. Retired fixed-format checkpoints are rejected without overwriting them.
-
-Synthetic promotion fixtures validate publication logic, **not measured candidate superiority**. Short test budgets do not establish production playing strength.
-
-## Browser checks
-
-```sh
 uv run --group browser python tests/ui_smoke.py
 ```
 
-Installed Chrome/Chromium is used; no browser is downloaded. Checks cover 9×9 and 13×13 boards, full bot turns, model selection without incumbent mutation, loss/score charts, keyboard/mobile use, same-origin tokens, run locking, no browser training endpoints and no JavaScript errors.
-
-At 1920×1080 and 1920×960, 100% zoom, the dashboard fits without document scrolling. Long history remains keyboard-scrollable. Empty success notices are hidden; thinking/errors remain visible.
-
-## Fresh checkout and generated data
-
-At the user's explicit request, all local `data/` runs, weights, replay, game records, old benchmark/gate reports and screenshots were removed. The repository contains source, documentation and curated regression fixtures—not a training dataset or pretrained model. `.gitignore` excludes new generated artifacts, including custom run paths.
-
-Tests clean up temporary checkpoints and games. The optional browser check writes an ignored `docs/connection-dashboard.png`; it is not a shipped result. New user-started runs initialize from scratch. The old fixed-rule trainer/UI and forwarding packages are removed; historical source remains in Git.
-
-CUDA utilization, GPU throughput, playing strength and external-engine performance remain unmeasured for the current framework.
+Checks use disposable data and clean up their games/models. Browser checks require installed Chrome/Chromium (`CHROME_EXECUTABLE` can override its path); no download occurs. Screenshots go to ignored `.native-cache/ui-dashboard.png`, not `docs/`. User training data is never removed by these checks.

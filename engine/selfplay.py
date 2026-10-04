@@ -1,6 +1,7 @@
 """Batched placement decisions and policy/value updates. Games always play to a terminal."""
 import math
 import time
+from functools import lru_cache
 import numpy as np
 import torch
 from .game import DEFAULT_RULES, Game, heuristic
@@ -110,10 +111,21 @@ def selfplay_samples(game, decision):
     return [sample]
 
 
+@lru_cache(maxsize=20_000)
+def _replay_features(board, dtype, player, left, rules):
+    # Bound the runtime cache to the default replay window; do not serialize it.
+    game = Game(np.frombuffer(board, dtype=dtype), player, left, rules=rules)
+    return game.features().astype(np.uint8)
+
+
 def train_step(net, optimizer, replay, batch_size, rng, device, *, rules=DEFAULT_RULES, metrics=None):
     batch = [replay[int(i)] for i in rng.integers(len(replay), size=batch_size)]
-    boards = [Game(row["board"].numpy(), row["player"], row["left"], rules=rules) for row in batch]
-    x = np.stack([g.features() for g in boards])
+    features = []
+    for row in batch:
+        board = row["board"].numpy()
+        features.append(_replay_features(board.tobytes(), board.dtype.str,
+                                        row["player"], row["left"], rules))
+    x = np.stack(features).astype(np.float32)
     p = np.stack([row["policy"].numpy().astype(np.float32) for row in batch])
     x, p = augment(x, p, rng)
     inputs = torch.from_numpy(x).to(device)

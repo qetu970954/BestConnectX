@@ -2,12 +2,15 @@
 import copy
 import json
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 import unittest
+import urllib.request
 from unittest.mock import patch
 import numpy as np
 import torch
@@ -165,6 +168,8 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             first = training.load_state(root / 'latest.pt', Rules())
             self.assertEqual((first['games'], first['step'], first['last_milestone']), (8, 32, 8))
+            self.assertNotIn('replay', load_checkpoint(root / 'latest.pt'))
+            self.assertTrue(first['replay'])
             self.assertTrue(all(row['board'].numel() == 81 for row in first['replay']))
             torch.manual_seed(first['settings']['seed'])
             initial = Network(**first['config'])
@@ -195,6 +200,9 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(milestone.read_bytes(), frozen)
             self.assertEqual(len(list((root / 'selfplay').glob('*.json'))), 12)
             self.assertEqual(len(list((root / 'replay').glob('*.pt'))), 12)
+            stats = history(root)['selfplay']
+            self.assertEqual((stats['games'], stats['first_game'], stats['last_game']), (12, 1, 12))
+            self.assertEqual(stats['black_wins'] + stats['white_wins'] + stats['draws'], 12)
             metric = json.loads(next((root / 'metrics').glob('*.json')).read_text())
             self.assertEqual(len(metric), 32)
             self.assertTrue(all(np.isfinite(row['loss']) for row in metric))
@@ -252,7 +260,23 @@ class EngineTests(unittest.TestCase):
             durable = training.load_state(Path(name) / 'latest.pt')
             self.assertEqual(durable['games'], 8)
             self.assertEqual(len(durable['pending_games']), 8)
-            training.train(args)
+            expected = [row for item in durable['pending_games'] for row in item['samples']]
+            self.assertTrue(expected)
+            def assert_replay(actual):
+                self.assertEqual(len(actual), len(expected))
+                for row, wanted in zip(actual, expected):
+                    self.assertEqual(row.keys(), wanted.keys())
+                    for key, value in wanted.items():
+                        if torch.is_tensor(value):
+                            torch.testing.assert_close(row[key], value, rtol=0, atol=0)
+                        else:
+                            self.assertEqual(row[key], value)
+            assert_replay(durable['replay'])
+            with patch.object(training, 'train_step', side_effect=AssertionError('No updates expected')), \
+                    patch.object(training, 'selfplay_batch', side_effect=AssertionError('No self-play expected')):
+                training.train(args)
+            resumed = training.load_state(Path(name) / 'latest.pt')
+            assert_replay(resumed['replay'])
             self.assertEqual(len(list((Path(name) / 'selfplay').glob('*.json'))), 8)
             self.assertEqual(len(list((Path(name) / 'replay').glob('*.pt'))), 8)
 
@@ -389,11 +413,11 @@ class EngineTests(unittest.TestCase):
                                    seconds=None, hours=.02, max_games=16, restart_gate=False)
             clock, loads = [0.], []
             original = training.load_state
-            def slow_load(path, rules=None):
+            def slow_load(path, rules=None, **kwargs):
                 if path.parent.name == 'models':
                     loads.append(path.name)
                     clock[0] += 1.1  # Two loads exceed the entire two-second evaluation slice.
-                return original(path, rules)
+                return original(path, rules, **kwargs)
             def action(game, *a, **kw):
                 clock[0] += .05
                 return int(game.actions()[0])
@@ -568,6 +592,114 @@ class EngineTests(unittest.TestCase):
             self.assertIn('Checkpoint rules', result.stderr)
             self.assertEqual((root / 'latest.pt').read_bytes(), original)
             self.assertFalse((root / 'run.json').exists())
+
+    def test_dashboard_saved_rules_and_exclusive_port(self):
+        from engine.cli import main
+        from engine import web
+        with tempfile.TemporaryDirectory() as name:
+            root, other = Path(name) / 'connect3', Path(name) / 'connect5'
+            for data, rules in ((root, Rules(3, 3, 3)), (other, Rules())):
+                save_json(data / 'run.json', {'rules': rules.id, 'rule_config': rules.to_dict()})
+            originals = [(data / 'run.json').read_bytes() for data in (root, other)]
+            with socket.socket() as sock:
+                sock.bind(('127.0.0.1', 0))
+                port = sock.getsockname()[1]
+            servers, errors, ready = [], [], threading.Event()
+            original_forever = web.HTTPServer.serve_forever
+            def forever(server, *args, **kwargs):
+                if servers:
+                    return  # A wrongly accepted second bind must fail fast, not hang the test.
+                servers.append(server)
+                ready.set()
+                original_forever(server, poll_interval=.01)
+            def start():
+                try:
+                    main(['web', '--data', str(root), '--port', str(port)])
+                except BaseException as error:
+                    errors.append(error)
+                    ready.set()
+            with patch.object(web.HTTPServer, 'serve_forever', forever):
+                worker = threading.Thread(target=start, daemon=True)
+                worker.start()
+                try:
+                    self.assertTrue(ready.wait(5), 'Dashboard did not start.')
+                    self.assertFalse(errors, errors)
+                    url = f'http://127.0.0.1:{port}/api/status'
+                    with urllib.request.urlopen(url, timeout=5) as response:
+                        status = json.load(response)
+                    self.assertEqual(status['rule_config'], Rules(3, 3, 3).to_dict())
+                    self.assertEqual((status['game']['size'], len(status['game']['board'])), (3, 9))
+                    self.assertEqual(Path(status['data_directory']), root.resolve())
+                    # The real CLI must reject another dashboard instead of silently sharing the URL.
+                    with self.assertRaises(SystemExit) as failure:
+                        main(['web', '--data', str(other), '--port', str(port)])
+                    self.assertEqual(failure.exception.code, 1)
+                    with urllib.request.urlopen(url, timeout=5) as response:
+                        self.assertEqual(json.load(response)['rule_config'], status['rule_config'])
+                    self.assertEqual([(data / 'run.json').read_bytes() for data in (root, other)], originals)
+                finally:
+                    if servers:
+                        servers[0].shutdown()
+                    worker.join(timeout=5)
+                    self.assertFalse(worker.is_alive(), 'Dashboard did not stop.')
+                # Closing a dashboard must still allow an immediate restart on its port.
+                main(['web', '--data', str(other), '--port', str(port)])
+
+    def test_selfplay_history_uses_latest_thousand_completed_games(self):
+        with tempfile.TemporaryDirectory() as name:
+            root, rules = Path(name), Rules(3, 3, 3)
+            empty = history(root)['selfplay']
+            self.assertEqual((empty['games'], empty['window']), (0, 1000))
+            self.assertIsNone(empty['mean_placements'])
+            self.assertIsNone(empty['black_win_rate'])
+            patterns = ([0, 3, 1, 4, 2], [0, 3, 1, 4, 8, 5], [0, 1, 2, 4, 3, 5, 7, 6, 8])
+            for number in range(1, 1002):
+                index = (number - 1) % 3
+                game = Game.from_moves(patterns[index], rules=rules)
+                self.assertTrue(game.done)
+                save_json(root / 'selfplay' / f'game-{number:09d}.json', {
+                    'game': number, 'rules': rules.id, 'rule_config': rules.to_dict(),
+                    'moves': game.moves, 'winner': game.winner, 'complete': True,
+                    'turns': [{'source': ('mcts', 'heuristic', 'forced')[index]} for _ in game.moves[1:]]})
+            # Incomplete work and evaluation matches must not change the training window.
+            save_json(root / 'selfplay' / 'game-000001002.json', {'complete': False})
+            save_json(root / 'gate-model-00002000.json', {'games': 100, 'wins': 100})
+            (root / 'selfplay' / 'game-000000001.json').touch()  # Modification time is not completion order.
+            stats = history(root)['selfplay']
+            self.assertEqual((stats['games'], stats['first_game'], stats['last_game']), (1000, 2, 1001))
+            self.assertEqual((stats['black_wins'], stats['white_wins'], stats['draws']), (333, 334, 333))
+            self.assertAlmostEqual(stats['black_win_rate'], .333)
+            self.assertAlmostEqual(stats['white_win_rate'], .334)
+            self.assertAlmostEqual(stats['draw_rate'], .333)
+            self.assertAlmostEqual(stats['mean_placements'], 6.666)
+            self.assertEqual(stats['mean_placements'], stats['mean_turns'])
+            self.assertEqual((stats['min_placements'], stats['median_placements'], stats['max_placements']), (5, 6, 9))
+            self.assertEqual(stats['source_counts'], {'mcts': 1332, 'heuristic': 1670, 'forced': 2664})
+            from engine import web
+            with patch.object(web, 'load_json', wraps=web.load_json) as reads:
+                self.assertEqual(history(root)['selfplay'], stats)
+                self.assertFalse(any(call.args[0].parent.name == 'selfplay' for call in reads.call_args_list))
+            save_json(root / 'selfplay' / 'game-000001003.json', {
+                'game': 1003, 'rule_config': rules.to_dict(), 'moves': patterns[0],
+                'winner': 1, 'complete': True, 'turns': []})
+            updated = history(root)['selfplay']
+            self.assertEqual((updated['games'], updated['first_game'], updated['last_game']), (1000, 3, 1003))
+            self.assertEqual((updated['black_wins'], updated['white_wins'], updated['draws']), (334, 333, 333))
+            # Count the opening and a partial winning turn, not just pairs of stones.
+            for config, moves, turns in (
+                (Rules(19, 19, 6, 2, 1), [0, 19, 20, 1, 2, 21, 22, 3, 4, 23, 40, 5], 7),
+                (Rules(4, 4, 3, 1, 2), [0, 1, 15, 2], 3),
+                (Rules(3, 3, 3, 2, 2), [0, 2, 1, 4, 3, 7, 5, 6, 8], 5)):
+                data = root / config.id
+                game = Game.from_moves(moves, rules=config)
+                self.assertTrue(game.done)
+                save_json(data / 'selfplay' / 'game-000000001.json', {
+                    'game': 1, 'rule_config': config.to_dict(), 'moves': moves,
+                    'winner': game.winner, 'complete': True, 'turns': []})
+                stats = history(data)['selfplay']
+                self.assertEqual((stats['games'], stats['mean_placements'], stats['mean_turns']), (1, len(moves), turns))
+                self.assertEqual((stats['black_win_rate'], stats['white_win_rate'], stats['draw_rate']),
+                                 (float(game.winner == 1), float(game.winner == -1), float(game.winner == 0)))
 
     def test_large_selfplay_batch_reaches_network_together(self):
         device_for('cpu')

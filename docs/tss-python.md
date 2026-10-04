@@ -27,4 +27,4 @@ The verifier independently reconstructs these replies. It rejects missing/extra 
 
 The CPU regression suite covers recursive verification, every second-stone filler reply, counterwins, malformed certificates, deadline/node cutoffs, forged flags, and plan continuation across restarts. See [framework validation](connection-validation.md).
 
-RZOP and DBS are not implemented. Keep Python as the correctness reference; consider native search only after representative profiling establishes a CPU bottleneck. No native port or GPU measurement is part of this cleanup.
+RZOP and DBS are not implemented. Keep Python as the correctness reference; consider native search only after representative profiling establishes a CPU bottleneck. TSS itself has no native port. Feature/selection acceleration and measured limits are in [performance notes](training-performance.md).

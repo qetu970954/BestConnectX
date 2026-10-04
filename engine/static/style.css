@@ -42,7 +42,7 @@ button.primary,button.secondary{font:inherit;font-size:13px;font-weight:650;bord
 .secondary{background:#263236;color:var(--text);border-color:#38474b!important}
 button:hover{filter:brightness(1.07)}
 button:disabled{cursor:not-allowed;opacity:.45}
-button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
+.card:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--lime);outline-offset:3px}
 .caption{font-size:11px;color:var(--muted);line-height:1.65;margin:16px 0 0}
 .card{padding:23px;border:1px solid var(--line);border-radius:15px;background:var(--panel);margin-bottom:18px}
 .card-title{display:flex;align-items:center;justify-content:space-between;gap:10px}
@@ -65,6 +65,8 @@ footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);fo
 .legend-policy{color:#78c9f0}
 .legend-value{color:#ef9565}
 #gate-results{overflow-wrap:anywhere}
+.stats-details{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.stats-details summary{cursor:pointer}
 @media(min-width:1200px){.intro{padding-bottom:8px}.board-panel{padding:28px}}
 @media(max-width:1000px){
   .workspace{grid-template-columns:minmax(0,1fr) 300px;gap:18px}
@@ -97,13 +99,18 @@ footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);fo
   .dashboard select,.dashboard input{padding:8px}
   .dashboard button.primary,.dashboard button.secondary{padding:9px 12px}
   .dashboard .caption{margin:8px 0 0}
-  .dashboard aside{min-height:0;display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+  .dashboard aside{min-height:0;display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);grid-template-rows:minmax(0,.9fr) minmax(0,1.1fr) auto;gap:16px;align-items:start}
   .dashboard .card{max-height:100%;min-height:0;padding:18px;margin:0;overflow:auto}
   .dashboard .training-summary{grid-column:1;grid-row:1}
-  .dashboard .incumbent-card{grid-column:1;grid-row:2}
-  .dashboard .loss-card{grid-column:2;grid-row:1}
+  .dashboard .selfplay-card{grid-column:2;grid-row:1}
+  .dashboard .incumbent-card{grid-column:1 / -1;grid-row:3;display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);column-gap:16px;align-items:center}
+  .dashboard .incumbent-card h3{grid-column:1;font-size:14px;margin:4px 0}
+  .dashboard .incumbent-card .caption{grid-column:2;grid-row:1 / span 2;margin:0}
+  .dashboard .loss-card{grid-column:1;grid-row:2}
   .dashboard .gate-card{grid-column:2;grid-row:2;height:100%;display:flex;flex-direction:column}
   .dashboard .metrics{gap:14px 12px;margin:14px 0}
+  .dashboard .selfplay-metrics{gap:10px 12px;margin:12px 0}
+  .dashboard .selfplay-metrics strong{font-size:22px;letter-spacing:-.5px}
   .dashboard .chart{margin:10px 0;flex-shrink:0}
   .dashboard #gate-results{min-height:0;overflow:auto}
   .dashboard #notice{padding:8px 12px;margin:0;min-height:0;overflow-wrap:anywhere}

@@ -139,11 +139,24 @@ class Game:
 
     def threats(self, player, budget=None):
         budget = self.turn_stones if budget is None else budget
-        cells = self.board[self.lines]
-        selected = self.lines[(np.sum(cells == player, axis=1) >= self.win_length - budget)
-                         & (np.sum(cells == -player, axis=1) == 0)
-                         & (np.sum(cells == 0, axis=1) > 0)]
-        return frozenset(frozenset(int(i) for i in line if self.board[i] == 0) for line in selected)
+        # Features, legal actions and proofs repeatedly inspect the same position.
+        # Include board contents and rules: callers can also edit the board directly.
+        key = (self.rules, self.board.tobytes())
+        if getattr(self, "_threat_key", None) != key:
+            cells = self.board[self.lines]
+            self._line_counts = {color: np.count_nonzero(cells == color, axis=1).astype(np.uint8)
+                                 for color in (-1, 0, 1)}
+            self._threat_cache = {}
+            self._threat_key = key
+        query = (player, budget)
+        if query in self._threat_cache:
+            return self._threat_cache[query]
+        selected = self.lines[(self._line_counts[player] >= self.win_length - budget)
+                             & (self._line_counts[-player] == 0)
+                             & (self._line_counts[0] > 0)]
+        result = frozenset(frozenset(int(i) for i in line if self.board[i] == 0) for line in selected)
+        self._threat_cache[query] = result
+        return result
 
     def features(self):
         planes = np.zeros((8, *self.shape), dtype=np.float32)
@@ -171,6 +184,67 @@ class Game:
             if required:
                 return np.array(sorted(set().union(*required)), dtype=np.int32)
         return np.flatnonzero(self.board == 0)
+
+
+def batch_features(games):
+    """Build identical planes with optional native kernels; reuse leaf line counts."""
+    from . import native
+    if not games:
+        raise ValueError("Features need at least one game.")
+    rules = games[0].rules
+    if any(game.rules != rules for game in games):
+        return np.stack([game.features() for game in games])
+    boards = np.stack([game.board for game in games])
+    players = np.array([game.player for game in games], dtype=np.int32)
+    lines = games[0].lines
+    keys = [(game.rules, game.board.tobytes()) for game in games]
+    result = native.features(boards, players, np.array([game.left for game in games], dtype=np.int32),
+                             lines, rules.stones_per_turn)
+    if result is not None:
+        planes, counts, threats = result
+        for index, (game, key) in enumerate(zip(games, keys)):
+            game._line_counts = {color: counts[index, slot] for slot, color in enumerate((-1, 0, 1))}
+            game._threat_cache = {}
+            game._threat_key = key
+            for slot, color in enumerate((-1, 1)):
+                mask = 0
+                for budget in range(1, rules.stones_per_turn + 1):
+                    mask |= 1 << (2 * slot + budget - 1)
+                    if not int(threats[index]) & mask:
+                        game._threat_cache[(color, budget)] = frozenset()
+        return planes.reshape(len(games), 8, rules.height, rules.width)
+    if len(games) == 1:
+        return np.stack([games[0].features()])
+    cells = np.take(boards, lines, axis=1)
+    if all(getattr(game, "_threat_key", None) == key for game, key in zip(games, keys)):
+        counts = {color: np.stack([game._line_counts[color] for game in games])
+                  for color in (-1, 0, 1)}
+    else:
+        counts = {color: np.count_nonzero(cells == color, axis=2).astype(np.uint8)
+                  for color in (-1, 0, 1)}
+        for index, (game, key) in enumerate(zip(games, keys)):
+            game._line_counts = {color: counts[color][index] for color in counts}
+            game._threat_cache = {}
+            game._threat_key = key
+    planes = np.zeros((len(games), 8, boards.shape[1]), dtype=np.float32)
+    planes[:, 0] = boards == players[:, None]
+    planes[:, 1] = boards == -players[:, None]
+    planes[:, 2] = np.array([game.left == 2 for game in games])[:, None]
+    planes[:, 3] = (players == 1)[:, None]
+    for offset, colors in ((4, players), (6, -players)):
+        own = np.where((colors == 1)[:, None], counts[1], counts[-1])
+        enemy = np.where((colors == 1)[:, None], counts[-1], counts[1])
+        valid = (enemy == 0) & (own >= rules.connect - rules.stones_per_turn)
+        has_threat = np.zeros(len(games), dtype=bool)
+        for gap in range(1, rules.stones_per_turn + 1):
+            eligible = valid & (counts[0] == gap)
+            has_threat |= eligible.any(axis=1)
+            for index in np.flatnonzero(~has_threat):
+                games[index]._threat_cache[(int(colors[index]), gap)] = frozenset()
+            rows, windows = np.nonzero(eligible)
+            edges, inside = np.nonzero(boards[rows[:, None], lines[windows]] == 0)
+            planes[rows[edges], offset + gap - 1, lines[windows[edges], inside]] = 1
+    return planes.reshape(len(games), 8, rules.height, rules.width)
 
 
 def covers(edges, budget):

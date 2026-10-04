@@ -19,10 +19,12 @@ from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
                       save_checkpoint, save_json, usage)
 from .selfplay import selfplay_batch, selfplay_samples, train_step, turn_action
 from .game import DEFAULT_RULES, Game, Rules
+from . import native
 
 GATE_GAMES = 100
 SOURCE_FILES = ["engine/game.py", "engine/training.py", "engine/network.py", "engine/search.py",
-                "engine/selfplay.py", "engine/tactics.py", "engine/tss.py", "engine/storage.py"]
+                "engine/selfplay.py", "engine/tactics.py", "engine/tss.py", "engine/storage.py",
+                "engine/native.py", "engine/native.cpp"]
 PROJECT = Path(__file__).resolve().parent.parent
 
 
@@ -37,7 +39,29 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def load_state(path, rules=None):
+def _replay_window(root, state):
+    """Read only the recent window, including games saved before an interrupted export."""
+    limit = state["settings"].get("replay_limit", 20_000)
+    pending = state.get("pending_games", [])
+    exported = {f"game-{item['record']['game']:09d}.pt" for item in pending}
+    chunks, count = [], 0
+    for item in reversed(pending):
+        chunks.append(item["samples"])
+        count += len(chunks[-1])
+        if count >= limit:
+            break
+    if count < limit:
+        for path in sorted((root / "replay").glob("game-*.pt"), reverse=True):
+            if path.name in exported:
+                continue
+            chunks.append(load_checkpoint(path).get("samples", []))
+            count += len(chunks[-1])
+            if count >= limit:
+                break
+    return [row for chunk in reversed(chunks) for row in chunk][-limit:]
+
+
+def load_state(path, rules=None, *, restore_replay=True):
     state = load_checkpoint(path)
     recorded = Rules(**state["rule_config"]) if "rule_config" in state else None
     if (state.get("format") != 1 or recorded is None or state.get("rules") != recorded.id
@@ -46,6 +70,8 @@ def load_state(path, rules=None):
             or (rules is not None and rules != recorded)):
         raise ValueError("Checkpoint rules do not match this run. Use a separate --data directory.")
     state["config"].pop("width", None)  # Old square prototypes stored a redundant width.
+    if restore_replay and "replay" not in state and "active" in state:
+        state["replay"] = _replay_window(Path(path).parent, state)
     return state
 
 
@@ -89,7 +115,9 @@ def _environment(root, cap):
         atomic_bytes(archive, stream.getvalue(), cap, root=root)
     return {"python": sys.version, "platform": platform.platform(), "torch": str(torch.__version__),
             "numpy": np.__version__, "cuda_build": torch.version.cuda, "code_sha256": sha,
-            "source_archive": archive.name}
+            "source_archive": archive.name,
+            "native_backend": {"kind": "cpp", "binary_sha256": digest(native.library_path())}
+                if native.library() is not None else {"kind": "python"}}
 
 
 def _immutable_json(root, name, value, cap):
@@ -327,7 +355,7 @@ def train(args):
 
 
 def _train(args, root, rules):
-    saved = load_state(root / "latest.pt", rules) if (root / "latest.pt").exists() else None
+    saved = load_state(root / "latest.pt", rules, restore_replay=False) if (root / "latest.pt").exists() else None
     manifest = load_json(root / "incumbent.json")
     run_info = load_json(root / "run.json") or load_json(root / "rules.json")
     if ((run_info and run_info["rules"] != rules.id)
@@ -377,7 +405,8 @@ def _train(args, root, rules):
         if device.type == "cuda" and saved.get("cuda_rng") is not None:
             torch.cuda.set_rng_state_all(saved["cuda_rng"])
         games, steps, since_update = saved["games"], saved["step"], saved["since_update"]
-        replay, active = saved["replay"], saved["active"]
+        replay = saved["replay"] if "replay" in saved else _replay_window(root, saved)
+        active = saved["active"]
         last_milestone, gate = saved["last_milestone"], saved["gate"]
         pending_games, pending_metrics = saved["pending_games"], saved["pending_metrics"]
         loss_metrics = saved["loss_metrics"]
@@ -403,8 +432,11 @@ def _train(args, root, rules):
 
     def checkpoint():
         state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
+        if saved is not None and "replay" in saved:
+            # Legacy replay may have no dataset export; retain it, with current samples.
+            state["replay"] = replay
         state.update(optimizer=optimizer.state_dict(), settings=settings, since_update=since_update,
-            replay=replay, active=active, last_milestone=last_milestone, gate=gate, phase_seconds=phase_seconds,
+            active=active, last_milestone=last_milestone, gate=gate, phase_seconds=phase_seconds,
             pending_games=pending_games, pending_metrics=pending_metrics, loss_metrics=loss_metrics,
             environment=environment, rng=rng.bit_generator.state,
             torch_rng=torch.get_rng_state(), cuda_rng=torch.cuda.get_rng_state_all() if device.type == "cuda" else None)

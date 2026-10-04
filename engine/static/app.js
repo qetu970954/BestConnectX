@@ -83,6 +83,22 @@ function render() {
   $('incumbent').textContent = state.incumbent?.label || state.incumbent?.id || '尚無里程碑模型；啟發式預覽';
   $('message').textContent = state.message || 'Loss 僅供診斷；是否升級以 100 場實戰得分為準。';
   $('milestone').textContent = `下一個模型：${Number(state.next_milestone || 1000).toLocaleString()} 場 · ${Math.ceil((state.remaining_seconds || 0) / 60)} 分鐘剩餘 · 時間目標 80/20（評估已用 ${(100 * Number(state.evaluation_share || 0)).toFixed(1)}%）· 同時 ${state.parallel || 64} 盤`;
+  const selfplay = history.selfplay || {window: 1000, games: 0, source_counts: {}};
+  $('selfplay-window').textContent = `${selfplay.games.toLocaleString()} / ${selfplay.window.toLocaleString()}`;
+  $('selfplay-range').textContent = selfplay.games ? `已保存第 ${selfplay.first_game.toLocaleString()}–${selfplay.last_game.toLocaleString()} 盤` : '尚無已保存的完整棋局';
+  for (const [id, key] of [['selfplay-length', 'mean_placements'], ['selfplay-turns', 'mean_turns'], ['selfplay-median', 'median_placements']]) {
+    $(id).textContent = Number.isFinite(selfplay[key]) ? selfplay[key].toFixed(1) : '—';
+  }
+  for (const [id, key] of [['black-rate', 'black_win_rate'], ['white-rate', 'white_win_rate'], ['draw-rate', 'draw_rate']]) {
+    $(id).textContent = Number.isFinite(selfplay[key]) ? `${(100 * selfplay[key]).toFixed(1)}%` : '—';
+  }
+  for (const [id, key, label] of [['black-wins', 'black_wins', '黑棋勝'], ['white-wins', 'white_wins', '白棋勝'], ['selfplay-draws', 'draws', '和棋']]) {
+    $(id).textContent = `${label} · ${Number(selfplay[key] || 0).toLocaleString()} 盤`;
+  }
+  $('selfplay-length-range').textContent = selfplay.games ? `最短 ${selfplay.min_placements} 子 · 最長 ${selfplay.max_placements} 子；開局與終局的未滿回合皆計入長度。` : '尚無長度資料';
+  const sources = Object.entries(selfplay.source_counts), decisions = sources.reduce((total, [, count]) => total + count, 0);
+  const sourceNames = {mcts: 'MCTS', heuristic: '啟發式', forced: '單一候選', proof_move: '短程證明', tss_move: 'TSS 證明'};
+  $('selfplay-sources').textContent = decisions ? `${sources.map(([source, count]) => `${sourceNames[source] || source} ${count.toLocaleString()}（${(100 * count / decisions).toFixed(1)}%）`).join(' · ')}。不含預設開局子。` : '尚無落子來源資料';
   const metric = state.loss_metrics || history.metrics.at(-1);
   plot('loss-chart', history.metrics, ['loss', 'policy_loss', 'value_loss']);
   $('loss-value').textContent = metric ? `總 loss ${metric.loss.toFixed(4)} · 策略 ${metric.policy_loss.toFixed(4)} · 價值 ${metric.value_loss.toFixed(4)}` : '尚無訓練更新';

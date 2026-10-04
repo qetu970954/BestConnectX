@@ -1,6 +1,7 @@
 """PUCT with batched leaves across games and same-player placement backups."""
 import time
 import numpy as np
+from . import native
 
 
 class Node:
@@ -21,9 +22,11 @@ class Node:
         self.total = np.zeros(len(x), dtype=np.float64)
 
     def select(self):
-        q = np.divide(self.total, self.visits, out=np.zeros_like(self.total), where=self.visits > 0)
-        u = 1.5 * self.prior * np.sqrt(1 + self.visits.sum()) / (1 + self.visits)
-        index = int(np.argmax(q + u))
+        index = native.select(self.prior, self.visits, self.total)
+        if index is None:
+            q = np.divide(self.total, self.visits, out=np.zeros_like(self.total), where=self.visits > 0)
+            u = 1.5 * self.prior * np.sqrt(1 + self.visits.sum()) / (1 + self.visits)
+            index = int(np.argmax(q + u))
         if index not in self.children:
             game = self.game.copy()
             game.play(int(self.actions[index]))

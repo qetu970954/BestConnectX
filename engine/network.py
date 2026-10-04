@@ -2,7 +2,7 @@
 import numpy as np
 import torch
 from torch import nn
-from .game import DEFAULT_RULES
+from .game import DEFAULT_RULES, batch_features
 
 
 class Residual(nn.Module):
@@ -36,7 +36,7 @@ class Network(nn.Module):
     def evaluate(self, games):
         self.eval()
         device = next(self.parameters()).device
-        x = torch.from_numpy(np.stack([g.features() for g in games])).to(device)
+        x = torch.from_numpy(batch_features(games)).to(device)
         with torch.autocast(device_type=device.type, enabled=device.type == "cuda"):
             policy, value = self(x)
         return policy.float().cpu().numpy(), value.float().cpu().numpy()
