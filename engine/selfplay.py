@@ -113,7 +113,7 @@ def selfplay_samples(game, decision):
 
 @lru_cache(maxsize=20_000)
 def _replay_features(board, dtype, player, left, rules):
-    # Bound the runtime cache to the default replay window; do not serialize it.
+    # Bound cached features separately from the replay buffer; never serialize this cache.
     from . import native
     from .runtime import Game as NativeGame
     implementation = NativeGame if native.library() is not None else Game  # Reference-only fallback for tests.

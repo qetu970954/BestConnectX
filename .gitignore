@@ -30,3 +30,9 @@ docs/*-gate.json
 docs/*-screen.json
 docs/*dashboard.png
 experiments/*_results.json
+*.png
+*.html
+*.jsonl
+
+# Local session transcripts
+codex-session-*.md

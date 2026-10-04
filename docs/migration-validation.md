@@ -1,8 +1,8 @@
-# Migration checks and measured search speed
+# Validation history and measured speed
 
 [繁體中文](migration-validation.zh-TW.md)
 
-The migration measurements below were recorded on 2026-10-04, before the model-variant and housekeeping updates. They are not fresh timings for every later revision. [Model-variant results](model-options.md) are recorded separately.
+These are recorded checks, not new timings for every revision. The original migration numbers date from 2026-10-04, before model variants and later cleanup. [Model results](model-options.md) and the [save-cadence comparison](selfplay-training-guidance-2026.md) are separate. For commands you can run now, use the [cheatsheet](cheatsheet.md).
 
 ## Machine and method
 
@@ -67,6 +67,22 @@ After removing the retired half-native forest, three Python-engine benchmarks, a
 All three architectures passed additional CPU learner/native agreement, complete-game checks on 3×3, 15×15, and 19×19, and temporary tic-tac-toe learning/resume checks. Each benchmark used two roots, four simulations, and one warm repeat; these small checks do not establish new speed or strength rankings. Raw records are `.native-cache/housekeeping-{residual,pooled,attention}-cpu.json`. No new CUDA benchmark or persistent training was run. Existing data and session files were not cleaned or migrated.
 
 Source changes invalidate an unfinished gate's code checksum. Use `--restart-gate` only if resume reports a pending-gate code change; this archives the previous comparison rather than mixing results. Ordinary checkpoints and model weights are retained.
+
+## Latest cleanup check: 2026-10-04
+
+The Python cleanup removed unused config/source return values and a one-call opening wrapper, moved replay restoration to one bounded path, and reused the native batch's timing output. It did not change model architectures, game rules, or permanent batch/concurrency defaults. Python references and storage/proof protections remain.
+
+**All 75 CPU tests passed in 29.842 seconds**, including the save-cadence guard and a new check that parses both cheatsheets' published command as 15×15 Connect6 without starting training. The installed-Chrome CPU smoke check also passed: boards, full turns, model choices, charts, stable layout, keyboard/mobile access, local token protection, and run locks.
+
+Model parameter counts, Python/JavaScript syntax, UTF-8, local links, and bilingual command parity passed. Source-digest calculation still matches the old algorithm. SHA-256 checks confirmed that **all 275 original `data/` files were unchanged**. No new GPU benchmark or persistent training was started. Local logs are `.native-cache/refactor-all-tests.log` and `.native-cache/refactor-ui-tests.log`.
+
+This validates the cleanup, not a new speed or strength gain. The earlier [save-cadence measurement](selfplay-training-guidance-2026.md) remains a separate, short comparison. Guides are now more conversational; migration decisions and research evidence remain historical records.
+
+## Later replay-default change
+
+The user subsequently requested **50,000 replay positions** as the new-run default. TOML, CLI, and training fallbacks now agree. CPU tests cover the CLI fallback without a TOML replay entry, the bounded 50,000-position window, and saved-limit preservation on resume. The separate feature cache remains bounded at 20,000 entries; it is not the replay buffer.
+
+All 75 CPU tests passed in 27.871 seconds, and the Chrome CPU smoke check passed. This is functional validation, not a full-capacity speed or strength benchmark. Historical 20,000-position measurements above remain unchanged. The earlier 275-file integrity check applies to the cleanup stage; those old run folders were no longer present for this later check, so it could not be repeated.
 
 ## Run the checks
 

@@ -29,11 +29,11 @@
 <p class="caption">每次存檔更新；不含評估對局。勝率以全部棋局為分母（含和棋），不代表棋力。</p>
 </section>
 <section class="card loss-card"><div class="eyebrow">訓練 Loss</div><p class="caption">L = 策略交叉熵 + 價值均方誤差</p><p class="caption"><span class="legend-total">總 loss</span> · <span class="legend-policy">策略</span> · <span class="legend-value">價值</span>（曲線抽樣，原始數據完整保存）</p><svg id="loss-chart" class="chart" viewBox="0 0 600 210" role="img" aria-label="訓練 loss 圖"></svg><p id="loss-value" class="caption">尚無訓練更新</p></section>
-<section class="card gate-card"><div class="eyebrow">候選模型對目前最佳 · 每版 100 場</div><p class="caption"><span class="legend-total">得分率：勝 1、和 0.5</span> · <span class="legend-policy">純勝率</span> · 虛線為 50% 升級門檻</p><svg id="gate-chart" class="chart" viewBox="0 0 600 210" role="img" aria-label="候選版本配對對戰得分及勝率圖"></svg><div id="gate-results" class="subtle" tabindex="0" role="region" aria-label="模型評估結果">尚無里程碑評估。每完成 1,000 場訓練自我對弈，保存一個模型並進行 100 場顏色交換評估。</div></section>
-<section class="card incumbent-card"><div class="eyebrow">目前最佳</div><h3 id="incumbent">尚無已通過評估的模型</h3><p class="caption">候選總得分超過 50% 才會升級；平手時保留舊版。失敗版本和評估棋譜仍會保留；不封存自我對弈棋譜。</p></section>
+<section class="card gate-card"><div class="eyebrow">候選模型對目前最佳 · 每版 100 場</div><p class="caption"><span class="legend-total">得分率：勝 1、和 0.5</span> · <span class="legend-policy">純勝率</span> · 虛線為 55% 暫定升級門檻</p><svg id="gate-chart" class="chart" viewBox="0 0 600 210" role="img" aria-label="候選版本配對對戰得分及勝率圖"></svg><div id="gate-results" class="subtle" tabindex="0" role="region" aria-label="模型評估結果">尚無里程碑評估。每完成 1,000 場訓練自我對弈，保存一個模型並進行 100 場顏色交換評估。</div></section>
+<section class="card incumbent-card"><div class="eyebrow">目前最佳</div><h3 id="incumbent">尚無已通過評估的模型</h3><p class="caption">候選總得分至少 55% 且通過計時檢查才可暫定升級，不代表已證實棋力。失敗版本和評估棋譜仍保留。</p></section>
 </aside>
 </div>
-<div id="notice" role="status" aria-live="polite"></div>
+<div id="notice" role="status" aria-live="polite" tabindex="0"></div>
 <footer><span>FREESTYLE CONNECTION GAMES · 自行訓練權重</span><span>棋力依本機配對評估呈現，不宣稱外部排名</span></footer>
 </main>
 </body>

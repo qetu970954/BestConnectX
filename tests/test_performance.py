@@ -89,6 +89,10 @@ class PerformanceTests(unittest.TestCase):
         state = {'settings': {'replay_limit': 5}, 'replay': [10, 20, 30, 40, 50, 60]}
         with patch.object(Path, 'glob', side_effect=AssertionError('Archive scan')):
             self.assertEqual(_replay_window(state), [20, 30, 40, 50, 60])
+            rows = list(range(50_001))
+            self.assertEqual(_replay_window({'settings': {}, 'replay': rows}), rows[1:])
+            self.assertEqual(_replay_window({'settings': {'replay_limit': 20_000}, 'replay': rows}),
+                             rows[-20_000:])
 
     def test_batched_features_match_scalar_features_across_rules_and_cache_edits(self):
         rng = np.random.default_rng(5070)

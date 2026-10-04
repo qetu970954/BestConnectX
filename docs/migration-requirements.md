@@ -1,10 +1,10 @@
-# Approved C++ migration agreement
+# C++ migration: what we agreed
 
 [繁體中文](migration-requirements.zh-TW.md)
 
 **Status: approved. The user confirmed: “This scope is correct—start implementation.” The agreed scope is implemented; checks and limits are recorded in the [validation report](migration-validation.md).**
 
-This document records the approved migration agreement. The later [model-experiment decision](adr/0002-shared-board-model-experiments.md) adds optional pooled and attention models without replacing the residual default. Housekeeping removes superseded reports and the half-native search path; the independent Python correctness references remain. Earlier implementation history is available in Git and [ADR 0001](adr/0001-python-reference-and-native-search.md).
+This page keeps the original migration decisions, not a list of open proposals. For everyday commands, use the [cheatsheet](cheatsheet.md). Later [model experiments](adr/0002-shared-board-model-experiments.md) added pooled and attention options; later [training decisions](selfplay-training-guidance-2026.md) changed save cadence and promotion to 55 points. The current request also favors conversational guides over the original technical tone. The residual default and Python correctness references remain. Old implementation history stays in Git and [ADR 0001](adr/0001-python-reference-and-native-search.md).
 
 ## Agreed direction: rounds 1–3
 
@@ -84,12 +84,12 @@ Do not remove legal-move checks, real game results, independent checking of clai
 
 Removing the repeat-experiment goal does not remove these safety checks.
 
-## Current work state
+## Implemented scope
 
 - Native Windows build and CPU/CUDA inference are checked.
 - Production playing, TSS/proof checks, PUCT, and model inference use C++; learning remains Python.
 - TOML presets, bounded checkpoint replay, safe resume, summary-only stats, and the dashboard are implemented.
-- CPU unit and browser checks passed. Temporary GPU checks stayed below the five-minute cap; no persistent training was started.
+- CPU unit and browser checks passed. Agent-run temporary GPU checks stayed within their approved budgets; the agent did not start persistent training. User-started training results are recorded separately.
 - Active docs have English/Traditional Chinese versions. See the [native guide](native-engine.md), [cheatsheet](cheatsheet.md), and [validation report](migration-validation.md).
 
 ## Related docs

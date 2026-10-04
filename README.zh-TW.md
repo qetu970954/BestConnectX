@@ -1,14 +1,14 @@
 # BestConnectX
 
-[English](README.md) · [操作速查](docs/cheatsheet.zh-TW.md) · [原生引擎](docs/native-engine.zh-TW.md) · [檢查與量測](docs/migration-validation.zh-TW.md)
+[English](README.md) · [指令速查](docs/cheatsheet.zh-TW.md) · [Bot 怎麼想](figures/how-bot-thinks.html)
 
-本機、從頭訓練的連棋 bot。**C++ 執行完整對弈及模型推論；Python／PyTorch 更新模型並管理實驗。** 瀏覽器負責成果檢視及對戰，不提供訓練控制。
+在自己的電腦上訓練連棋 bot，再用瀏覽器跟它下棋。**C++ 負責棋規、搜尋和模型推論；Python／PyTorch 負責學習和存檔。** 專案沒有附上訓練好的權重。
 
-預設為 **15×15 自由五子棋、64 通道、6 個殘差區塊**。殘差區塊將輸入加回學習結果；寬度及深度可透過設定調整。不附帶已訓練 bot 權重。
+預設是 **15×15 自由五子棋**，搭配 **64 通道、6 個殘差區塊的模型**。也支援六子棋，以及兩種實驗中的模型設計。
 
-五子棋及六子棋也可選用 `pooled` 與 `attention` 模型，保留全部八個遊戲特徵、原生推論及安全續訓。見[模型 presets 與檢查](docs/model-options.zh-TW.md)及[架構決策](docs/adr/0002-shared-board-model-experiments.zh-TW.md)。
+## 先跑起來
 
-## 安裝與建置
+在專案資料夾執行：
 
 ```sh
 uv sync --locked
@@ -16,91 +16,93 @@ uv run python -m engine.native
 uv run python dashboard.py --open-browser
 ```
 
-必須建置原生引擎。Windows 使用已安裝的 MSVC x64 C++ 工具，以及 PyTorch wheel 內的標頭／程式庫。本路徑不需要另裝 CUDA SDK、CMake 或匯出模型。已使用 PyTorch 2.11.0+cu128 驗證 Windows CPU／CUDA。Unix 建置路徑需要 C++17 編譯器，本機未驗證該路徑。
+Dashboard 會開在 **http://127.0.0.1:8765**。還沒訓練時，bot 用的是沒有學習權重的規則式選點。瀏覽器用來下棋、看結果；訓練則在終端機執行。
 
-Dashboard 網址為 **http://127.0.0.1:8765**，Ctrl+C 關閉。另一個 dashboard 可用 `--port 8766`。所有指令在 repo 根目錄執行；修改原生來源或 PyTorch 後須重新建置。
+Windows 需要 MSVC x64 C++ 建置工具。建置直接使用 PyTorch 附的程式庫，不必另外裝 CUDA SDK 或 CMake。已用 PyTorch 2.11.0+cu128 檢查 Windows CPU／CUDA。Unix 路徑需要 C++17 編譯器，目前還沒在這裡驗證。改過原生程式或 PyTorch 後，記得重新建置。
 
-## 訓練、停止、續訓
+## 訓練 15×15 六子棋
 
-以下指令**由你執行時**才啟動訓練：
+`connect6` preset 預設是 **19×19**。要訓練 15×15，別漏掉棋盤大小：
+
+```sh
+uv run python train.py --preset connect6 --board-size "15*15" --data data/connect6-15x15 --device cuda --hours 2
+uv run python dashboard.py --data data/connect6-15x15 --open-browser
+```
+
+黑棋第一回合下一子，之後每回合下兩子。連成六子或更多就贏；一旦獲勝，回合立刻結束，不必把第二子下完。
+
+如果這個目錄已經有 checkpoint，會接著續訓。想從頭做新實驗，就換一個 `--data` 目錄。沒有 CUDA 的話，改用 `--device cpu`。
+
+要跑預設五子棋，只要：
 
 ```sh
 uv run python train.py
-uv run python -m engine status --data data/connect5-15x15-s1-o1-v1
-uv run python -m engine stop --data data/connect5-15x15-s1-o1-v1
 ```
 
-Ctrl+C 或 `stop` 會要求安全 checkpoint。等待保存訊息後再關閉。強制終止可能遺失上次保存後的工作。
+## 停下來，之後再接著練
 
-重複訓練指令即可續訓。自訂 run 使用 `train.py --data PATH` 時會恢復已保存的棋規、模型及學習設定。明確指定的執行時限、裝置、工作執行緒數及棋局並行量可調整；不同模型形狀或棋規必須使用新的 run 目錄。
+在訓練的終端機按 **Ctrl+C**，等到看到 **Saved** 再關閉。也可以在另一個終端機要求停止：
 
 ```sh
-uv run python train.py --preset gomoku-large --data data/larger-model
-uv run python train.py --data data/larger-model --hours 0.25 --workers 2
-uv run python dashboard.py --data data/larger-model --open-browser
+uv run python -m engine status --data data/connect6-15x15
+uv run python -m engine stop --data data/connect6-15x15
+uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 ```
 
-設定見 [`configs/experiments.toml`](configs/experiments.toml)。`--config FILE` 選擇其他檔案；`--preset NAME` 選擇命名 preset。新 run 的明確 CLI 旗標覆寫設定檔。不承諾精確重跑，也不提供舊 checkpoint 匯入器。
+續訓會恢復存好的棋規、模型、optimizer 和學習設定。你可以改這次的執行時間、裝置、CPU 工作執行緒和同時進行的棋局數。**但重新傳入 `--batch` 或 `--learning-rate`，不會改掉存檔裡的值。** 換棋規或模型大小，需要新目錄。
 
-## 其他棋規 presets
+如果續訓提示未完成比賽的程式碼已變更，再看 [`--restart-gate`](docs/cheatsheet.zh-TW.md) 的說明。一般續訓不用加它。
 
-```sh
-# 第一盤檢查：不更新模型、不保存棋譜
-uv run python -m engine selfplay --preset tictactoe --games 1 --device cpu
+## 訓練時到底在做什麼？
 
-# 要求原生引擎完成棋局；只輸出摘要，不產生落子檔案
-uv run python -m engine selfplay --preset gomoku --games 10 --model heuristic --device cpu
+1. 最新模型自己跟自己下棋。C++ 先檢查戰術，再搭配神經網路做 MCTS 搜尋。
+2. 下完的棋局提供近期訓練樣本，也就是 **replay**。結果來自真的勝、和、負，不會把沒證完的戰術當成勝負。
+3. Python 用這些樣本更新模型。CLI 顯示的 **optimizing** 就是在學習，不是在打比賽。
+4. 每完成 **1,000 盤**，保存一份不再更改的對弈模型。檔名數字算的是棋局，不是學習更新次數。
+5. 第一份里程碑先當初始 best，後面的里程碑再自動挑戰目前 best。
 
-# 後續六子棋實驗
-uv run python train.py --preset connect6
-uv run python dashboard.py --preset connect6 --open-browser
-```
+每次比賽有 **100 盤**：50 組相同開局，交換黑白。候選要拿到**至少 55 分**、全部棋譜通過檢查，而且完整回合超時最多 **0.1 秒**，才會升級。贏一盤得 1 分，和棋得 0.5 分。預設每完整回合思考 **0.25 秒**，包含六子棋的兩次落子；雙方使用相同模擬上限，預設 64 次。
 
-僅支援正方形棋盤，邊長 2..25，`--connect` 為 2..邊長。四個方向中連成指定長度**或更長**即勝，沒有禁手或交換開局。黑棋首回合及後續回合各允許一或兩子；獲勝立即停止，包含兩子回合只下第一子的情況。不同棋規使用獨立預設 run 目錄。
+這是實用的退步篩檢，**不是棋力變強的統計證明**。比賽沒過，也不會把訓練中的模型退回舊版。自我對弈繼續用最新權重，只有 best 保持不變。
 
-## 對弈與學習
+訓練和評估輪流使用 GPU，時間分配目標大約是 **80% 訓練／20% 評估**。沒有待比賽的模型時，就把時間拿來訓練。
 
-```text
-C++：棋規 → 戰術及經檢查的證明 → 批次 PUCT／推論 → 真實終局
-Python：近期訓練樣本 → 模型更新 → 安全 checkpoint 及凍結模型
-C++：安全點接收更新權重 → 下一個對弈批次
-```
+想用圖理解搜尋？打開 [Bot 怎麼想](figures/how-bot-thinks.html)。**MCTS** 探索接下來的局面；**PUCT** 決定先探索哪條分支；**TSS** 尋找必勝戰術，但找到後還要獨立檢查。
 
-**MCTS**（蒙地卡羅樹搜尋）探索後續局面並回傳價值。**PUCT** 是其中的分支選擇規則，在估計價值、模型落子先驗及訪問次數之間取得平衡。**TSS** 是威脅空間搜尋，用來尋找強制獲勝計畫。攻方搜尋有界；獨立檢查必須涵蓋所有可阻擋攻擊的回應，並排除對手先獲勝。未完成證明代表未知，不代表必敗。證明只引導落子；訓練標籤只取自真實終局。
+## 模型檔案該用哪一個？
 
-- C++ 推論使用 FP32；CUDA 學習使用 BF16，CPU 學習使用 FP32。
-- 模型更新與棋局生成交替執行，搜尋批次期間不更新權重。
-- Loss 為策略交叉熵加上價值均方誤差。學習時抽樣八種旋轉／反射，不儲存八份資料。
-- 預設 64 盤並行、6 個 CPU 工作執行緒、每落子 64 次模擬、optimizer batch 128。這些是不同設定；更多執行緒不一定更快。
-- 保留有效時間 80% 訓練／20% 評估目標，每四秒訓練累積一秒評估額度。沒有待評估 gate 時，全部有效時間用於訓練。
-- 每完成 1,000 盤保存凍結模型。第一個是初始比較基準，不代表已證實棋力。
-- 後續模型以 50 組開局、交換顏色，共 100 盤挑戰目前最佳。升級須得分超過 50%，且完整回合超時不超過 0.1 秒；和棋得 0.5 分。預設每完整回合思考 0.25 秒。
-- Gate 可續跑，資料不進入訓練 replay。凍結權重、棋規及程式碼檢查保護每次比較。只有修改程式碼或上限後，才用 `--restart-gate` 封存並重啟未完成 gate。
-
-Dashboard 顯示實驗／模型資訊、搜尋／推論／學習／保存實測時間、loss 與 gate 圖，以及最近 1,000 盤已完成訓練棋局摘要。摘要只含勝者、長度、回合數及落子來源計數，不含落子或棋盤歷史。自我對弈勝率描述資料，不是棋力。對戰前先停止訓練。支援雙方顏色、完整 bot 回合，以及 best／latest／凍結模型選擇。方向鍵移動焦點，Enter／Space 落子。請求限本機並使用同源 token。
-
-## 儲存
-
-| Run 內路徑 | 用途 |
+| Run 目錄內的檔案 | 拿來做什麼 |
 | --- | --- |
-| `run.json` | 已保存棋規、模型形狀、設定及環境資訊 |
-| `latest.pt` | 權重、optimizer、有界 replay、進行中棋局／證明計畫、待更新／metrics、計數器及 RNG |
-| `selfplay-stats.json` | 最多 1,000 盤摘要，checkpoint 後發布 |
-| `models/`、`incumbent.json` | 凍結模型與目前最佳版本 |
-| `metrics/`、`gate-model-*.json`、`gate-archive/` | Loss 資料、可續跑評估棋譜及已封存 gate 報告 |
+| `latest.pt` | 接著訓練：包含權重、optimizer、近期樣本、未完棋局、待辦更新和隨機狀態 |
+| `best.pt` | 跟目前接受的模型下棋；第一份基準還沒驗證棋力 |
+| `models/model-00001000.pt` 等 | 跟固定里程碑下棋；不能恢復完整學習狀態 |
+| `incumbent.json` | 記錄目前哪份里程碑才是 best，以這份為準 |
+| `run.json`、`status.json` | 保存的設定和目前進度 |
+| `selfplay-stats.json`、`metrics/` | 近期棋局摘要和 loss 歷史 |
+| `gate-model-*.json`、`gate-archive/` | 可接著跑的比賽棋譜和已封存的比較 |
 
-不產生永久 `selfplay/` 棋譜封存、逐局 `replay/` 匯出或原始碼 ZIP。評估棋譜仍保留供 gate 檢查；近期 replay 樣本及未完成棋局可以保存在 checkpoint。
+`latest.pt` 大約**每 60 秒在安全點自動保存**，啟動、里程碑和正常停止時也會保存。長操作可能讓存檔延後。停電或強制關閉，會失去上次完整存檔之後的工作。
 
-保存為原子操作，預設磁碟上限 20 GiB。容量不足時保留前一份 checkpoint，不默默清理資料。有界 replay 淘汰舊樣本是正常學習行為，不是刪除既有檔案。生成的 run 與 `.native-cache/` 不進 Git；刪除後無法由 Git 還原。
+存檔採用原子替換。預設磁碟上限是 **20 GiB**；滿了就停止，不會偷偷刪掉舊模型。下完的自我對弈棋譜不另外封存，近期樣本和未完棋局留在 checkpoint；比賽棋譜則保留給驗證用。如果 `best.pt` 匯出中斷，續訓會依 `incumbent.json` 修復。
 
-## 檢查
+## 下棋、調設定、跑檢查
+
+要讓 dashboard 的 bot 下棋，先暫停訓練。可以選 best、latest 或編號里程碑，六子棋 bot 會完成整個回合。方向鍵移動焦點，Enter／Space 落子。Dashboard 用 Ctrl+C 關閉；要再開一個就加 `--port 8766`。請求限本機，並使用同源 token。
+
+起始設定是 **6 個 CPU 工作執行緒、64 盤同時進行、每次落子 64 次模擬、學習 batch 128**。這些是不同控制，不是同一種 batch。執行緒更多、GPU 更忙，不代表 bot 一定更強。預設學習率固定 **0.001**，沒有自動排程。
+
+新 run 可以改 [`configs/experiments.toml`](configs/experiments.toml)，或直接傳入旗標。`pooled` 和 `attention` 是選用實驗，請各自使用新目錄。棋盤必須是正方形，邊長 2–25。五子棋沒有禁手或交換開局，超過五子也算贏。
 
 ```sh
 uv run python -m unittest discover -s tests -v
-uv run --group browser python tests/ui_smoke.py
-uv run python -m experiments.benchmark_native --device cpu --output .native-cache/checks.json
+uv run --frozen --group browser python tests/ui_smoke.py
 ```
 
-瀏覽器檢查使用已安裝 Chrome、CPU 及暫存 run，不下載瀏覽器。[驗證報告](docs/migration-validation.zh-TW.md)記錄分階段檢查及配對搜尋時間。短測試**不能**證明每訓練小時的棋力增益。
+瀏覽器檢查使用已安裝的 Chrome、CPU 和暫存 run，不必下載瀏覽器。Python 參考實作還留著，是因為測試要用它檢查 C++，不是正式對弈的備援引擎。
 
-現行需求：[已核准共識](docs/migration-requirements.zh-TW.md)。模型設計：[研究比較](docs/model-options.zh-TW.md)。[詞彙表](CONTEXT.zh-TW.md)定義遊戲共用語言。過時的 Python 引擎報告及效能測試已移除；獨立 Python 參考實作仍保留供正確性測試。
+- [操作速查](docs/cheatsheet.zh-TW.md)：直接可用的指令、presets 和續訓規則。
+- [原生引擎](docs/native-engine.zh-TW.md)：程式分工和安全檢查。
+- [模型選擇](docs/model-options.zh-TW.md)：殘差、池化和注意力。
+- [學習率](docs/learning-rates.zh-TW.md)：哪些時候可以改。
+- [訓練決策與量測](docs/selfplay-training-guidance-2026.zh-TW.md)：存檔開銷和短時間速度比較。
+- [驗證紀錄](docs/migration-validation.zh-TW.md)、[核准的移植範圍](docs/migration-requirements.zh-TW.md)和[詞彙表](CONTEXT.zh-TW.md)。

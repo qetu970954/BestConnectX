@@ -31,6 +31,14 @@ _Avoid_: Model size, training accuracy, GPU usage
 **Weights**:
 The numbers learned by a model. They are not the learning or search rules.
 
+**Learner**:
+The model whose weights change as it learns from the replay window. It is not necessarily the accepted incumbent.
+_Avoid_: Best model
+
+**Self-play actor**:
+The bot version that generates training games. It can use learner weights without being accepted as incumbent.
+_Avoid_: Incumbent when only game generation is meant
+
 **Turn**:
 One player's chance to place the allowed number of stones. The opening may differ; a win ends the turn early, and a full-turn time limit includes every placement.
 _Avoid_: Move when it is unclear whether one placement or a turn is meant

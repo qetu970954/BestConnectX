@@ -1,10 +1,10 @@
-# 已核准 C++ 移植共識
+# C++ 移植：當時同意了什麼
 
 [English](migration-requirements.md)
 
 **狀態：已核准。使用者確認「This scope is correct—start implementation.」。已實作共識範圍，檢查及限制見[驗證報告](migration-validation.zh-TW.md)。**
 
-本文件記錄已核准移植共識。後續[模型實驗決議](adr/0002-shared-board-model-experiments.zh-TW.md)加入可選池化及注意力模型，不取代殘差預設。此次整理移除過時報告及半原生搜尋路徑，保留獨立 Python 正確性參考實作。先前實作歷史可由 Git 及 [ADR 0001](adr/0001-python-reference-and-native-search.zh-TW.md)查閱。
+這頁保留原本的移植決策，不是還沒定案的提案清單。日常指令直接看[操作速查](cheatsheet.zh-TW.md)。後來的[模型實驗](adr/0002-shared-board-model-experiments.zh-TW.md)加入池化和注意力選項；後來的[訓練決策](selfplay-training-guidance-2026.zh-TW.md)調整存檔頻率，並把升級門檻改成 55 分。目前也改用比較口語的指南，而不是原先的技術語氣。殘差預設和 Python 正確性參考實作仍保留；舊實作歷史可看 Git 和 [ADR 0001](adr/0001-python-reference-and-native-search.zh-TW.md)。
 
 ## 第一至第三輪已同意方向
 
@@ -84,12 +84,12 @@ CPU 檢查不計入 GPU 預算。GPU 測試程序從啟動到結束的實際時�
 
 撤回實驗重現目標，不代表撤回上述安全檢查。
 
-## 目前執行狀態
+## 已實作範圍
 
 - 已驗證 Windows 原生建置及 CPU／CUDA 推論。
 - 正式對弈、TSS／證明檢查、PUCT 及模型推論使用 C++，學習保留 Python。
 - 已實作 TOML presets、checkpoint 有界 replay、安全續訓、僅摘要統計及 dashboard。
-- CPU 單元／瀏覽器檢查已通過，暫存 GPU 檢查低於五分鐘上限；未啟動持久訓練。
+- CPU 單元／瀏覽器檢查已通過。Agent 的暫存 GPU 檢查都在各次核准預算內，沒有由 agent 啟動持久訓練；使用者自行啟動的訓練結果另有記錄。
 - 現行文件提供英文／繁體中文版本，見[原生指南](native-engine.zh-TW.md)、[操作速查](cheatsheet.zh-TW.md)及[驗證報告](migration-validation.zh-TW.md)。
 
 ## 相關文件

@@ -182,6 +182,9 @@ class EngineTests(unittest.TestCase):
             best = json.loads((root / 'incumbent.json').read_text())
             self.assertTrue(best['initial_baseline'])
             self.assertEqual(best['file'], 'models/model-00000008.pt')
+            self.assertEqual((root / 'best.pt').read_bytes(), frozen)
+            self.assertNotIn('optimizer', training.load_state(root / 'best.pt'))
+            self.assertNotIn('replay', training.load_state(root / 'best.pt'))
             self.assertFalse((root / 'selfplay').exists())
             self.assertFalse((root / 'replay').exists())
             self.assertEqual(len(first['summaries']), 8)
@@ -225,8 +228,7 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(legacy.read_bytes(), original_identity)
             saved = training.load_state(Path(name) / 'latest.pt', rules)
             self.assertEqual(saved['games'], 2)
-            for path in (Path(name) / 'selfplay').glob('*.json'):
-                self.assertTrue(Game.from_moves(json.loads(path.read_text())['moves'], rules=rules).done)
+            self.assertFalse((Path(name) / 'selfplay').exists())
             result = cli('-m', 'engine', 'play', '--data', name, '--model', 'latest', '--device', 'cpu',
                          '--seconds', '.02', stdin=json.dumps({'moves': [84]}))
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -242,6 +244,64 @@ class EngineTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('square', result.stderr)
             self.assertEqual((Path(name) / 'latest.pt').read_bytes(), original)
+
+    def test_short_run_saves_replay_twice_not_after_every_optimization_cycle(self):
+        # CUDA comparison: 12 full saves before the fix, 2 after; assert cadence, not hardware speed.
+        with tempfile.TemporaryDirectory() as name:
+            args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
+                simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=1000,
+                seconds=.25, hours=.01, max_games=24, channels=4, blocks=1, workers=1)
+            with patch.object(training.time, 'monotonic', return_value=0.), \
+                    patch.object(training, 'save_checkpoint', wraps=training.save_checkpoint) as writes, \
+                    patch.object(training, 'train_step', wraps=training.train_step) as updates, \
+                    patch('builtins.print'):
+                training.train(args)
+            latest = [call for call in writes.call_args_list if call.args[0].name == 'latest.pt']
+            self.assertGreater(updates.call_count, 32)  # Several learning cycles really executed.
+            self.assertEqual(len(latest), 2, 'A short run must not serialize replay after each learning cycle.')
+            self.assertEqual([call.args[1]['games'] for call in latest], [0, 24])
+            saved = training.load_state(Path(name) / 'latest.pt')
+            self.assertEqual((saved['games'], saved['step']), (24, updates.call_count))
+            self.assertTrue(saved['replay'])
+            self.assertGreater(saved['timings']['cpu_search_seconds'], 0.)
+            self.assertFalse((Path(name) / 'models').exists())  # No milestone or timed autosave was due.
+
+    def test_autosave_keeps_pending_updates_without_duplicate_cycle_saves(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
+                simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=1000,
+                seconds=.25, hours=.01, max_games=8, channels=4, blocks=1, workers=1)
+            clock, saves = [0.], []
+            original_batch, original_step, original_save = training.selfplay_batch, training.train_step, training.save_checkpoint
+            def batch(*a, **kw):
+                result = original_batch(*a, **kw)
+                clock[0] += 1.
+                return result
+            def step(*a, **kw):
+                result = original_step(*a, **kw)
+                clock[0] += 61.  # A slow update exceeds the autosave interval and session deadline.
+                return result
+            def save(path, state, *a, **kw):
+                if path.name == 'latest.pt':
+                    saves.append((clock[0], state['step']))
+                original_save(path, state, *a, **kw)
+                clock[0] += 7.  # Measure the next interval from save completion, not its start.
+            with patch.object(training.time, 'monotonic', lambda: clock[0]), \
+                    patch.object(training, 'selfplay_batch', batch), \
+                    patch.object(training, 'train_step', step), \
+                    patch.object(training, 'save_checkpoint', save), patch('builtins.print'):
+                training.train(args)
+            self.assertEqual([step for _, step in saves], [0, 1, 1])  # Startup, timed autosave, shutdown.
+            saved = training.load_state(root / 'latest.pt')
+            self.assertEqual((saved['games'], saved['step'], saved['settings']['pending_updates']), (8, 1, 31))
+            self.assertTrue(saved['replay'])
+            with patch.object(training, 'selfplay_batch', side_effect=AssertionError('No new games expected')), \
+                    patch('builtins.print'):
+                training.train(args)
+            resumed = training.load_state(root / 'latest.pt')
+            self.assertEqual((resumed['games'], resumed['step'], resumed['since_update']), (8, 32, 0))
+            self.assertNotIn('pending_updates', resumed['settings'])
 
     def test_summary_write_failure_recovers_from_durable_checkpoint(self):
         with tempfile.TemporaryDirectory() as name:
@@ -293,7 +353,7 @@ class EngineTests(unittest.TestCase):
             save_json(root / 'incumbent.json', {**opponent, 'kind': 'network', 'rules': rules.id})
             report = {'rules': rules.id, 'candidate': candidate, 'opponent': opponent, 'incumbent': opponent['id'],
                 'opening_seed': 90000016, 'seconds_per_turn': .02, 'matches': [], 'current': None,
-                'max_turn_overrun_seconds': 0.0, 'promoted': False, 'code_sha256': training._source()[1]}
+                'max_turn_overrun_seconds': 0.0, 'promoted': False, 'code_sha256': training._code_sha256()}
             filename = 'gate-model-00000016.json'
             save_json(root / filename, report)
             self.assertEqual(history(root)['gates'][0]['games'], 0)
@@ -331,19 +391,24 @@ class EngineTests(unittest.TestCase):
                 self.assertEqual(row['candidate_color'], 1 if i % 2 == 0 else -1)
                 if i % 2:
                     self.assertEqual(row['opening'], result['matches'][i - 1]['opening'])
-            # Replace one draw/loss with an actually played win: strictly more than 50/100 qualifies.
+            # Replace actual terminal results until exactly 55/100 points; smaller scores cannot promote.
             better = copy.deepcopy(result)
-            index = next(i for i, row in enumerate(better['matches']) if row['score'] < 1)
-            row = better['matches'][index]
             rng = np.random.default_rng(42)
-            for _ in range(1000):
-                game = Game.from_moves(row['opening'], rules=rules)
-                while not game.done:
-                    game.play(int(rng.choice(np.flatnonzero(game.board == 0))))
-                if game.winner == row['candidate_color']:
-                    row.update(moves=game.moves, score=1.0)
+            for row in sorted(better['matches'], key=lambda row: row['score']):
+                if better['score'] >= .55:
                     break
-            self.assertEqual(row['score'], 1.0)
+                for _ in range(1000):
+                    game = Game.from_moves(row['opening'], rules=rules)
+                    while not game.done:
+                        game.play(int(rng.choice(np.flatnonzero(game.board == 0))))
+                    if game.winner == row['candidate_color']:
+                        row.update(moves=game.moves, score=1.0)
+                        break
+                self.assertEqual(row['score'], 1.0)
+                training.gate_summary(better)
+                if better['score'] < .55:
+                    self.assertFalse(training.verify_gate(better, rules))
+            self.assertEqual(better['score'], .55)
             self.assertTrue(training.verify_gate(better, rules))
             late = copy.deepcopy(better)
             late['max_turn_overrun_seconds'] = .11
@@ -352,7 +417,13 @@ class EngineTests(unittest.TestCase):
             invalid['matches'][1]['candidate_color'] = 1
             with self.assertRaises(ValueError):
                 training.verify_gate(invalid, rules)
-            training._finish_gate(root, root / filename, better, rules, 20 * GIB)
+            (root / 'best.pt').write_bytes(frozen[0])
+            with patch.object(training, 'atomic_bytes', side_effect=OSError('injected best export failure')):
+                with self.assertRaises(OSError):
+                    training._finish_gate(root, root / filename, better, rules, 20 * GIB)
+            self.assertEqual((root / 'best.pt').read_bytes(), frozen[0])
+            training._finish_gate(root, root / filename, better, rules, 20 * GIB)  # Repair interrupted export.
+            self.assertEqual((root / 'best.pt').read_bytes(), frozen[1])
             best = json.loads((root / 'incumbent.json').read_text())
             self.assertEqual(best['file'], candidate['file'])
             self.assertEqual(best['previous']['file'], opponent['file'])
@@ -363,7 +434,7 @@ class EngineTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as name:
             root, rules = Path(name), Rules(5, 5, 5, 2, 1)
             report = training._gate_report(rules, {'games': 16}, {},
-                {'gate_seconds': .25, 'simulations': 2}, training._source()[1])
+                {'gate_seconds': .25, 'simulations': 2}, training._code_sha256())
             save_json(root / 'gate.json', report)
             clock, budgets = [0.], []
             durations = iter((.31, .06, .125))
@@ -398,7 +469,7 @@ class EngineTests(unittest.TestCase):
             opponent = {'file': 'models/model-00000008.pt', 'games': 8, 'kind': 'network', 'rules': rules.id,
                         'sha256': training.digest(root / 'models/model-00000008.pt')}
             save_json(root / 'incumbent.json', opponent)
-            gate = training.next_gate(root, rules, settings, training._source()[1], 20 * GIB)
+            gate = training.next_gate(root, rules, settings, training._code_sha256(), 20 * GIB)
             state = training.snapshot(net, 0, rules, 16)
             state.update(settings=settings, optimizer=torch.optim.AdamW(net.parameters()).state_dict(),
                 since_update=0, replay=[], active=[], last_milestone=16, gate=gate,
@@ -459,8 +530,18 @@ class EngineTests(unittest.TestCase):
             with patch.object(training.time, 'monotonic', lambda: clock[0]), \
                     patch.object(training, 'selfplay_batch', timed_batch), \
                     patch.object(training, 'train_step', timed_step), \
-                    patch.object(training, 'turn_action', timed_action):
+                    patch.object(training, 'turn_action', timed_action), \
+                    patch('builtins.print') as output:
                 training.train(args)
+                lines = [call.args[0] for call in output.call_args_list]
+                self.assertNotIn('CLI-controlled', '\n'.join(lines))
+                bootstrap = next(line for line in lines if line.startswith('bootstrap:'))
+                self.assertNotIn(' | loss ', bootstrap)
+                optimizing = next(line for line in lines if line.startswith('optimizing:'))
+                self.assertRegex(optimizing, r'loss \d+\.\d{4} \(policy \d+\.\d{4}, value \d+\.\d{4}\)')
+                self.assertTrue(all(' | next ' in line and 's left' in line for line in lines))
+                self.assertTrue(any('Frozen gate:' in line for line in lines))
+                self.assertIn(' | Saved.', lines[-1])
                 state = training.load_state(root / 'latest.pt')
                 self.assertEqual(state['games'], 24)
                 self.assertTrue((root / 'models/model-00000024.pt').exists())
@@ -481,7 +562,7 @@ class EngineTests(unittest.TestCase):
             # Saved snapshots form the queue. After a tie, the next one still challenges the old best.
             report.update(decision_recorded=True, promoted=False)
             save_json(root / state['gate'], report)
-            next_name = training.next_gate(root, args.rules, state['settings'], training._source()[1], 20 * GIB)
+            next_name = training.next_gate(root, args.rules, state['settings'], training._code_sha256(), 20 * GIB)
             next_report = json.loads((root / next_name).read_text())
             self.assertEqual(next_report['candidate']['games'], 24)
             self.assertEqual(next_report['opponent']['games'], 8)
@@ -498,7 +579,7 @@ class EngineTests(unittest.TestCase):
                         'sha256': training.digest(opponent_path), 'kind': 'network', 'rules': rules.id}
             save_json(root / 'incumbent.json', opponent)
             settings = {'gate_seconds': 5., 'simulations': 64}
-            gate = training.next_gate(root, rules, settings, training._source()[1], 20 * GIB)
+            gate = training.next_gate(root, rules, settings, training._code_sha256(), 20 * GIB)
             report = json.loads((root / gate).read_text())
             report['current'] = {'moves': [8, 0, 1, 2]}
             report['elapsed_seconds'] = 120.
@@ -507,7 +588,7 @@ class EngineTests(unittest.TestCase):
             original = (root / gate).read_bytes()
             frozen = [path.read_bytes() for path in sorted((root / 'models').glob('*.pt'))]
             settings['gate_seconds'] = .25
-            restarted = training.restart_gate(root, gate, rules, settings, training._source()[1], 20 * GIB)
+            restarted = training.restart_gate(root, gate, rules, settings, training._code_sha256(), 20 * GIB)
             self.assertEqual(restarted['matches'], [])
             self.assertIsNone(restarted['current'])
             self.assertEqual(restarted['seconds_per_turn'], .25)
@@ -518,7 +599,7 @@ class EngineTests(unittest.TestCase):
             opponent_path.write_bytes(b'changed weights')
             unchanged = (root / gate).read_bytes()
             with self.assertRaises(ValueError):
-                training.restart_gate(root, gate, rules, settings, training._source()[1], 20 * GIB)
+                training.restart_gate(root, gate, rules, settings, training._code_sha256(), 20 * GIB)
             self.assertEqual((root / gate).read_bytes(), unchanged)
 
     def test_checkpoint_gate_restart_preserves_active_work_and_weights(self):

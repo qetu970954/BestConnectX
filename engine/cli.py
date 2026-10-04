@@ -53,7 +53,7 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description="Original C++ connection-game self-play with Python learning")
     try:
-        selected, options, explicit = load_options(argv)
+        options, explicit = load_options(argv)
     except (ValueError, OSError) as exc:
         parser.exit(1, f'Config error: {exc}\n')
     commands = parser.add_subparsers(dest="command", required=True)
@@ -79,7 +79,8 @@ def main(argv=None):
                           help='New-run model: residual baseline, pooled value, or pooled value plus board attention')
     training.add_argument('--workers', type=int, default=None, help='Native CPU threads; explicit values also apply on resume')
     training.add_argument('--learning-rate', type=float, default=.001)
-    training.add_argument('--replay-limit', type=int, default=20_000)
+    training.add_argument('--replay-limit', type=int, default=50_000,
+                          help='Recent completed-game positions (new-run default: 50000); restored on resume')
     training.add_argument('--bootstrap-games', type=int, default=16)
     training.add_argument('--updates-per-cycle', type=int, default=32)
     generation = commands.add_parser('selfplay', help='Generate a bounded number of native self-play games without model updates')

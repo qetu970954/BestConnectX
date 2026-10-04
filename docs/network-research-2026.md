@@ -2,9 +2,9 @@
 
 [繁體中文](network-research-2026.zh-TW.md) · [Learning rates](learning-rates.md)
 
-Reviewed 2026-10-04. Recommendation: keep the current residual baseline and all eight input planes; first compare a small globally pooled value head. Recent architectures provide experiment ideas, but none of the sources below establishes better strength per training hour in this repository or in its Connect6 implementation. This report records research, with no new benchmarking or training.
+Reviewed 2026-10-04. **Keep the residual baseline and all eight inputs.** Pooled value and one-block attention are now implemented experiments, not automatic upgrades. Start with [model choices and local checks](model-options.md) if you want commands; this page explains the papers behind the ideas.
 
-Implementation update: after this survey, the user requested trying these ideas in both games. `pooled` and a one-block `attention` variant are now implemented as optional experiments. See [model settings and local checks](model-options.md) and the [ADR design tree](adr/0002-shared-board-model-experiments.md); the published evidence below remains separate from local results.
+None of the sources below proves better strength per hour for this repo's Gomoku or Connect6. Published results and our local checks stay separate. This survey itself did not run new training or benchmarks. The [architecture decision](adr/0002-shared-board-model-experiments.md) records what we chose to implement.
 
 ## Repository baseline and shared inputs
 
@@ -41,7 +41,7 @@ For a later input experiment, directional line counts and gaps could add useful 
 
 These are hypotheses for both games, not published gains in this repo:
 
-1. **Pooled value head first.** Keep the eight planes, 64/6 trunk, spatial policy, and scalar value target. Compare the baseline against a modest 1×1 value projection, global mean pooling, and the 64-unit MLP. This removes the dense input proportional to board area, but pooling loses absolute layout; regional pooling is a later option if that hurts tactics. Global summaries may help assess separated threats, including Connect6 pair threats.
+1. **Pooled value head first.** Keep the eight planes, 64/6 trunk, spatial policy, and scalar value target. Compare the baseline against a modest 1×1 value projection, global mean pooling, and the 64-unit MLP. This removes the dense input proportional to board area, but reduces direct spatial detail in the value head; regional pooling is a later option if that hurts tactics. Global summaries may help assess separated threats, including Connect6 pair threats.
 2. **Then test the implemented attention variant.** It keeps the pooled value head and adds one board-attention block. Full attention has quadratic cell-pair work and extra memory cost. Compare it against both `residual` and `pooled` before changing the default.
 3. **Only then consider another change.** A 64/8 trunk, SE-style block, regional pooling, or directional inputs are separate hypotheses, not implemented improvements. Rapfi-style codebooks also need export, incremental state, and rule-specific adaptation. Add one change at a time only if the measured strength benefit justifies its cost.
 

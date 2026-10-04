@@ -1,8 +1,8 @@
-# 移植檢查與搜尋效能量測
+# 驗證紀錄和實測速度
 
 [English](migration-validation.md)
 
-下列移植量測記錄於 2026-10-04，早於模型變體及此次整理，不是每個後續版本的新量測。[模型變體結果](model-options.zh-TW.md)另有記錄。
+這裡放的是各階段的檢查紀錄，不是每次修改都重新量的速度。原本的移植數字來自 2026-10-04，早於模型變體和後續清理。[模型結果](model-options.zh-TW.md)與[存檔頻率比較](selfplay-training-guidance-2026.zh-TW.md)另有記錄。想直接跑指令，請看[操作速查](cheatsheet.zh-TW.md)。
 
 ## 環境與方法
 
@@ -67,6 +67,22 @@ CUDA 學習檢查中，PyTorch 回報配置峰值約為五子棋 139.2 MiB、六
 三種架構皆通過額外 CPU 學習端／原生一致性、3×3／15×15／19×19 完整棋局，以及暫存井字棋學習／續訓檢查。各效能測試使用兩個根節點、四次模擬及一次暖機後執行；這些小型檢查不建立新的速度或棋力排名。原始紀錄為 `.native-cache/housekeeping-{residual,pooled,attention}-cpu.json`。沒有新增 CUDA 效能測試或持久訓練；既有資料及 session 檔案未清理或遷移。
 
 程式碼變更會使未完成 gate 的程式碼 checksum 不符。只有續訓提示此問題時，才使用 `--restart-gate` 封存先前比較，避免混合結果。一般 checkpoint 及模型權重仍保留。
+
+## 最近一次清理檢查：2026-10-04
+
+Python 清理移除沒人在用的設定／來源回傳值和只呼叫一次的開局包裝，讓 replay 只走一條有上限的恢復路徑，並直接用原生批次的時間輸出。模型架構、棋規、batch／並行預設都沒改；Python 參考實作和存檔／證明保護也還在。
+
+**75 個 CPU 測試全部通過，耗時 29.842 秒**。包含存檔頻率回歸檢查，也新增測試：把兩份速查表的實際指令交給 parser，確認是 15×15 六子棋，不啟動訓練。已安裝 Chrome 的 CPU smoke check 也通過，涵蓋棋盤、完整回合、模型選擇、圖表、穩定版面、鍵盤／手機操作、本機 token 和 run lock。
+
+模型參數數量、Python／JavaScript 語法、UTF-8、本機連結和中英指令一致性都通過。來源 digest 計算仍與舊演算法相同；SHA-256 確認 **275 個原始 `data/` 檔案全部未變**。沒有新增 GPU 效能測試或持久訓練。紀錄在 `.native-cache/refactor-all-tests.log` 和 `.native-cache/refactor-ui-tests.log`。
+
+這是在驗證清理，不是新的速度或棋力增益。先前的[存檔頻率量測](selfplay-training-guidance-2026.zh-TW.md)仍是另一次短比較。指南已改得比較口語；移植決策和研究證據仍保留為歷史紀錄。
+
+## 後來的 replay 預設調整
+
+使用者後來要求，新 run 預設保留 **50,000 個 replay 局面**。TOML、CLI 和訓練端備用預設已一致。CPU 測試涵蓋 TOML 沒寫 replay 時的 CLI 預設、50,000 局面的上限，以及續訓保留原上限。特徵快取仍另外限制在 20,000 筆，它不是 replay buffer。
+
+75 個 CPU 測試全部通過，耗時 27.871 秒；Chrome CPU smoke check 也通過。這是功能驗證，不是填滿 buffer 後的速度或棋力量測。上面的 20,000 局面舊量測不變。275 檔案的完整性檢查屬於前一次清理；這次檢查時，舊 run 資料夾已不在，因此無法重做。
 
 ## 執行檢查
 

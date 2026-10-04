@@ -31,6 +31,14 @@ _Avoid_: Model size, training accuracy, GPU usage
 **Weights**：
 模型學到的數值，不等同學習或搜尋規則。
 
+**Learner**：
+從 replay window 學習並更新權重的模型，不一定是已接受的 incumbent。
+_Avoid_: Best model
+
+**Self-play actor**：
+用於產生訓練棋局的 bot 版本，可使用 learner 權重而尚未成為 incumbent。
+_Avoid_: Incumbent when only game generation is meant
+
 **Turn**：
 一位玩家放置允許棋子數的機會。開局可能不同，獲勝可提早結束，完整回合時限包含全部落子。
 _Avoid_: Move when it is unclear whether one placement or a turn is meant

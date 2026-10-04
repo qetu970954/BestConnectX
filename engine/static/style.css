@@ -53,9 +53,9 @@ button:disabled{cursor:not-allowed;opacity:.45}
 .metrics span{font-size:10px;color:var(--muted)}
 .incumbent-card{background:linear-gradient(130deg,#27352b,#192225)}
 h3{font-size:17px;font-weight:550;margin:15px 0 8px}
-#notice{padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;margin-top:20px;min-height:48px}
+#notice{padding:14px 18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:12px;margin-top:20px;height:48px;overflow:auto;overflow-wrap:anywhere}
 #notice.error{border-color:#a55b44;color:#ffb79d}
-.dashboard #notice:empty{padding:0;margin:0;min-height:0;border:0}
+.dashboard #notice:empty{visibility:hidden}
 footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);font-size:9px;letter-spacing:1px;margin-top:30px}
 .command{padding:12px;background:#111a1c;border:1px solid var(--line);border-radius:8px;color:var(--lime);font:12px/1.8 ui-monospace,monospace;overflow-wrap:anywhere}
 .chart{display:block;width:100%;height:auto;margin:12px 0}
@@ -113,6 +113,6 @@ footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);fo
   .dashboard .selfplay-metrics strong{font-size:22px;letter-spacing:-.5px}
   .dashboard .chart{margin:10px 0;flex-shrink:0}
   .dashboard #gate-results{min-height:0;overflow:auto}
-  .dashboard #notice{padding:8px 12px;margin:0;min-height:0;overflow-wrap:anywhere}
+  .dashboard #notice{padding:8px 12px;margin:0;height:36px}
   .dashboard footer{margin:0}
 }

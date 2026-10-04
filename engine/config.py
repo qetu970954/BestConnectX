@@ -37,4 +37,4 @@ def load_options(argv):
     explicit = {item.split('=')[0].lstrip('-').replace('-', '_') for item in argv if item.startswith('--')}
     if 'config' in explicit or 'preset' in explicit:
         explicit.update(options)
-    return selected, options, explicit
+    return options, explicit

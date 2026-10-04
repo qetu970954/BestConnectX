@@ -23,6 +23,19 @@ if not Path(chrome).is_file():
     raise SystemExit('Set CHROME_EXECUTABLE to an installed Chrome/Chromium executable. No browser will be downloaded.')
 
 
+def layout(page):
+    return {selector: page.locator(selector).bounding_box() for selector in
+            ('#board', '.play-controls', '.training-summary', '.selfplay-card',
+             '#loss-chart', '#gate-chart', '.incumbent-card', 'footer')}
+
+
+def assert_layout(before, after):
+    for selector, bounds in before.items():
+        assert bounds and after[selector], selector
+        assert all(abs(after[selector][key] - value) <= 1 for key, value in bounds.items()), (
+            selector, bounds, after[selector])
+
+
 def check(data, flags, connect6, browser):
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
@@ -81,13 +94,17 @@ def check(data, flags, connect6, browser):
             board = page.locator('#board').bounding_box()
             assert abs(board['width'] - board['height']) < 1
         page.set_viewport_size({'width': 1920, 'height': 1080})
+        baseline = layout(page)
         assert page.evaluate("action('/api/move', {cell:-1})") is False
         expect(page.locator('#notice')).to_be_visible()
         expect(page.locator('#notice')).to_have_class('error')
+        assert_layout(baseline, layout(page))
         page.evaluate("notice('AI 正在思考…')")
         expect(page.locator('#notice')).to_be_visible()
+        assert_layout(baseline, layout(page))
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.evaluate("notice('')")
+        assert_layout(baseline, layout(page))
         page.locator('#seconds').fill('.02')
         page.locator('.selfplay-card .stats-details summary').focus()
         page.keyboard.press('Enter')
@@ -100,8 +117,18 @@ def check(data, flags, connect6, browser):
         page.keyboard.press('Enter')
         expect(page.locator('.selfplay-card .stats-details')).not_to_have_attribute('open', '')
         center = size * size // 2
+        baseline = layout(page)
+        thinking_layout = []
+        def capture_thinking(route):
+            thinking_layout.append(layout(page))
+            route.continue_()
+        page.route('**/api/bot', capture_thinking)
         page.locator('.cell').nth(center).click()
         expect(page.locator('.black, .white')).to_have_count(3 if connect6 else 2, timeout=60000)
+        page.unroute('**/api/bot', capture_thinking)
+        assert thinking_layout
+        assert_layout(baseline, thinking_layout[0])
+        assert_layout(baseline, layout(page))
         expect(page.locator('#turn')).to_contain_text('你的回合')
         expect(page.locator('#notice')).to_be_empty()
         expect(page.locator('#notice')).to_be_hidden()
@@ -114,6 +141,10 @@ def check(data, flags, connect6, browser):
         else:
             expect(page.locator('#loss-chart polyline')).to_have_count(3)
             expect(page.locator('#gate-chart polyline')).to_have_count(2)
+            expect(page.locator('.gate-card')).to_contain_text('55%')
+            expect(page.locator('.incumbent-card')).to_contain_text('55%')
+            threshold = page.locator('#gate-chart line[stroke-dasharray]').get_attribute('y1')
+            assert abs(float(threshold) - 98.7) < .000001  # 55% on the 0..1 score axis.
             expect(page.locator('#gate-results')).to_contain_text('100/100')
             best = page.evaluate("fetch('/api/status').then(r=>r.json()).then(s=>s.incumbent.file)")
             page.locator('#model').select_option('latest')
@@ -140,6 +171,14 @@ def check(data, flags, connect6, browser):
             'X-Engine-Token':document.querySelector('meta[name="engine-token"]').content},body:'{"human":true}'}).then(r=>r.status)""") == 400
         page.set_viewport_size({'width': 390, 'height': 844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        baseline = layout(page)
+        page.evaluate("notice('AI 正在思考…')")
+        assert_layout(baseline, layout(page))
+        page.evaluate("notice('Bot failed: ' + 'long error message '.repeat(50), true)")
+        assert_layout(baseline, layout(page))
+        assert page.locator('#notice').evaluate('(node) => node.scrollHeight > node.clientHeight')
+        page.evaluate("notice('')")
+        assert_layout(baseline, layout(page))
         page.locator('.cell').nth(center).focus()
         page.keyboard.press('ArrowRight')
         assert page.locator('.cell').nth(center + 1).evaluate('(cell) => cell === document.activeElement')

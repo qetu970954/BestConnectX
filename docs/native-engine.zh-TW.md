@@ -1,67 +1,69 @@
-# 原生引擎與實驗設定
+# 引擎怎麼分工
 
-[English](native-engine.md) · [操作速查](cheatsheet.zh-TW.md)
+[English](native-engine.md) · [指令速查](cheatsheet.zh-TW.md) · [圖解](../figures/how-bot-thinks.html)
 
-**Checkpoint** 是續訓所需的保存狀態。**Replay** 指近期訓練樣本。**Optimizer** 利用 loss gradients 更新權重，gradients 表示可降低 loss 的方向。**推論（inference）** 在不更改權重的情況下預測分數。
+簡單說：**C++ 下棋，Python 訓練和管理 run。** 沒有另外的 actor 服務，也不會一邊搜尋、一邊讓 learner 改權重。
 
-## 語言分工
+## 想看程式，從哪裡找？
 
-| 檔案 | 用途 |
+| 檔案 | 工作 |
 | --- | --- |
-| `engine/runtime.h`、`engine/runtime.cpp` | 棋規、快取連線視窗、棋盤、威脅、合法動作、啟發式、TSS、獨立證明檢查、PUCT、抽樣、工作執行緒及完整 bot 回合 |
-| `engine/inference.cpp` | C++ 殘差、池化及注意力模型、權重 buffers，以及 LibTorch CPU／CUDA 推論 |
-| `engine/native.cpp` | 原生搜尋使用的 PUCT 選擇，以及與 Python 比對的特徵／計數核心 |
-| `engine/native.py`、`engine/runtime.py` | 建置／載入，以及標準程式庫 `ctypes` 的具型別狀態傳輸 |
-| `engine/network.py`、`engine/selfplay.py` | Python 模型定義、樣本準備、optimizer 更新及僅供測試的參考對弈 |
-| `engine/game.py`、`engine/search.py`、`engine/tactics.py`、`engine/tss.py` | 共用棋規／狀態型別，以及獨立 Python 正確性參考實作 |
-| `engine/training.py`、`engine/generation.py` | 要求工作、計數棋局、管理學習／評估及保存狀態 |
-| `engine/config.py`、`engine/cli.py`、`engine/web.py` | TOML 設定、指令及本機 dashboard |
+| `engine/runtime.h`、`engine/runtime.cpp` | 棋規、棋盤、威脅、合法動作、戰術搜尋、證明檢查、MCTS／PUCT、工作執行緒和完整 bot 回合 |
+| `engine/inference.cpp` | LibTorch 模型和 CPU／CUDA 推論 |
+| `engine/native.cpp` | PUCT 選點，以及有參考比對的特徵／計數核心 |
+| `engine/native.py`、`engine/runtime.py` | 建置、載入程式庫，透過 `ctypes` 傳遞具型別陣列 |
+| `engine/network.py`、`engine/selfplay.py` | 定義 learner、準備樣本、更新權重；也保留測試用參考對弈 |
+| `engine/game.py`、`engine/search.py`、`engine/tactics.py`、`engine/tss.py` | 共用型別和獨立 Python 正確性參考實作 |
+| `engine/training.py`、`engine/generation.py` | 訓練、比賽、存檔，以及要求完整棋局 |
+| `engine/config.py`、`engine/cli.py`、`engine/web.py` | TOML presets、指令和本機 dashboard |
 
-Python 保存可序列化棋局狀態以管理工作，正式棋規計算及決策使用 C++。搜尋自行複製及落子葉節點棋盤，不呼叫 Python。工作執行緒跨根節點準備葉節點／特徵，再以一次原生呼叫評估整批。停止 callback 是管理檢查，不是棋類或模型呼叫。
+Python 保管可存檔的棋局狀態。正式決策由 C++ 做：複製搜尋用棋盤、落子、跨棋局準備特徵，再整批推論。Python 的停止 callback 只檢查該不該停，不負責下棋。
 
-JSON bot 指令在 C++ 內完成一／兩子完整回合。訓練及 gate 在安全落子點交還控制以保存未完成棋局。正式對弈必須使用 C++ 引擎，沒有 Python 對弈 fallback。不建立獨立 actor 服務，也不並行執行 learner。
+JSON bot 指令會在 C++ 裡完成一／兩子的整個回合。訓練和比賽則會在落子之間交還控制，讓未完棋局能保存。Python 對弈參考實作是測試工具，不是正式備援路徑。
 
-## 建置及模型一致性
+## 建置和同步權重
 
 ```sh
 uv sync --locked
 uv run python -m engine.native
 ```
 
-二進位快取鍵涵蓋所有原生來源／標頭內容及 PyTorch 版本。Windows 使用 Release 風格的 MSVC `/MD`，連結已安裝 wheel 的程式庫；先匯入 PyTorch 載入配套 runtime，再載入原生程式。已驗證 Windows CPU／CUDA，Unix 建置路徑尚未驗證。
+快取鍵包含原生來源／標頭內容和 PyTorch 版本。Windows 使用 MSVC `/MD` 和已安裝 PyTorch 的程式庫，先由 PyTorch 載入 runtime，再載入原生程式庫。Windows CPU／CUDA 已檢查，Unix 路徑還沒驗證。
 
-Python 與 C++ 模型保留棋盤形狀，層名稱及形狀一致。設定包括通道數、殘差區塊數及棋盤邊長。Python 將權重及 batch normalization 的 running buffers 複製到獨立原生推論模型；optimizer 更新後，下一次棋局生成會在搜尋前刷新 buffers。凍結 gate 模型不受 learner 刷新。
+Python 和 C++ 的層名稱、形狀要一致。學習後，下一批棋局生成會把權重和 batch normalization buffers 複製到獨立原生模型；搜尋期間保持不變。比賽用的模型則在整次比較中都固定。原本殘差模型的 C 建立介面保留不變，變體使用另一個入口。
 
-設定也可選擇 `residual`、`pooled` 或 `attention`。實驗變體使用全域池化價值頭；`attention` 再加一個含可學習二維相對位置 bias 的四-head Transformer 區塊。全部使用相同八個遊戲特徵及 C++ 推論。舊 checkpoint 缺少架構欄位時代表 `residual`。更改架構須新 run。見[模型及檢查](model-options.zh-TW.md)與 [ADR](adr/0002-shared-board-model-experiments.zh-TW.md)。
+全部模型都吃相同八個遊戲特徵平面。`residual` 是預設；`pooled` 換掉價值頭；`attention` 再加一個四-head 棋盤注意力區塊。格式 2 的 checkpoint 沒有架構欄位，就當作 residual。換架構要新 run，詳見[模型選擇](model-options.zh-TW.md)。
 
-**FP32** 是 32 位元浮點運算，原生 CPU／CUDA 推論使用 FP32。**BF16** 是較小的浮點格式，CUDA 學習透過 PyTorch autocast 使用。本版不使用 TorchScript、模型匯出、AOTInductor、CUDA graphs 或自訂 GPU kernel。
+原生推論用 **FP32**（32 位元浮點數）。CUDA 學習透過 PyTorch autocast 用 **BF16**，CPU 學習仍用 FP32。這條路徑沒有 TorchScript、AOTInductor、CUDA graph 或自訂 GPU kernel。
 
-## 設定與上限
+## 設定和學習
 
-[`configs/experiments.toml`](../configs/experiments.toml) 包含 `[defaults]` 與 `[presets.NAME]`。鍵名對應 CLI destinations，例如 `board_size`、`channels`、`blocks`、`workers`、`parallel`。錯誤鍵、型別及範圍在訓練前被拒絕；新 run 的明確旗標覆寫檔案值。
+[`configs/experiments.toml`](../configs/experiments.toml) 放預設值和 presets。新 run 的明確旗標會覆寫檔案值。續訓沿用已保存的學習／搜尋設定；可以明確改執行緒數或並行量，不必丟掉未完棋局。換模型或棋規要新 run，也不保證計時實驗每次完全一樣。
 
-- 棋盤邊長 2..25、連線長度 2..邊長，開局／後續回合各一或兩子。
-- 模型 4..256 通道、0..32 殘差區塊。附帶 large preset 為 128/10，不是模型最大上限；大型實驗前須檢查記憶體。
-- 並行根節點 1..128、原生工作執行緒 1..12、學習 batch 2..4096。
-- 近期 replay 1..200,000 樣本，預設 20,000；進行中棋局樣本也占用 RAM／checkpoint 空間。
-- 預設使用固定學習率 0.001 的 AdamW，weight decay 為 0.0001。新 run 可設定 `learning_rate` 或 `--learning-rate`。Bootstrap 預設 16 盤；每完成八盤累積 32 次更新。較大的完成批次保留同比例更新工作。
+| 設定 | 允許範圍／預設 |
+| --- | --- |
+| 棋盤邊長／連線長度 | 2–25／2–邊長；只支援正方形 |
+| 開局／後續回合棋子數 | 各為 1 或 2 |
+| 通道／殘差區塊 | 4–256／0–32；預設 64 / 6 |
+| 同時進行棋局／CPU 執行緒 | 1–128／1–12；預設 64 / 6 |
+| 學習 batch | 2–4096；預設 128 |
+| 近期 replay | 1–200,000 個局面；新 run 預設 50,000，續訓保留原上限 |
 
-續訓恢復已保存學習／搜尋設定。明確更改工作執行緒或並行量時，保留未完成棋局並輪替進入新批次；更改模型／棋規須新 run。設定系統不承諾計時實驗可精確重現。
+Learner 用 AdamW，預設學習率固定 **0.001**，weight decay 是 **0.0001**。一般每完成八盤觸發 32 次更新，較大的完成批次會按比例往上增加工作。預設前 16 盤用規則式選點。學習時抽近期已完成棋局，旋轉／反射棋盤，再降低策略交叉熵和價值均方誤差。[學習率設定](learning-rates.zh-TW.md)適用新 run，不會覆寫續訓值。
 
-續訓時，明確傳入 `--learning-rate` 也不會覆寫保存值。沒有自動學習率排程，也沒有策略／價值的獨立學習率。見[學習率設定與研究](learning-rates.zh-TW.md)。
+## 安全檢查不會省掉
 
-## 證明及保存安全
+- **證明要獨立檢查。** 攻方搜尋可以限制候選數，驗證端則另行重建能阻擋攻擊的回應，包含合法第二子補位，也要檢查對手是否先贏。無效證明不能拿來下棋；時間或節點用完只代表未知，改走一般搜尋。
+- **勝負來自真的終局。** 戰術證明只引導落子，價值標籤要等棋局真的勝、和、負。
+- **先保存恢復狀態，再發布摘要。** 格式 2 的 `latest.pt` 包含權重、optimizer、有上限的 replay、未完棋局／計畫、待辦工作、計數和隨機狀態。發布摘要或 metrics 失敗，可從它重試。舊格式會被拒絕，沒有舊 run 匯入器。
+- **約一分鐘存一次，不是每輪學習都存。** 棋局生成／更新的安全點可自動保存，長學習週期內也能保存。每次成功保存後才重設計時器；啟動、里程碑、正常停止仍會存，長操作可能延後。
+- **Best 是對弈模型，不是續訓檔。** `incumbent.json` 選定固定里程碑，`best.pt` 原子匯出它。續訓可修復缺少或中斷的匯出。後續升級要在 100 盤經驗證的配對對局拿至少 55 分，回合超時最多 0.1 秒；第一份基準還沒驗證棋力。
+- **不偷偷刪檔。** 保留原子替換、獨占 run lock、磁碟上限、固定里程碑和比賽棋譜檢查。不建立永久的已完成自我對弈棋譜封存。
 
-攻方候選可以排序及限制。證明檢查不依賴搜尋端 cover 生成器，獨立重建防守回應，包含合法第二子填充及對手先獲勝。無效證明不能引導落子；時間／節點上限代表未知，回到一般搜尋。價值標籤須等棋盤達到真實終局才產生。
+重構程式可能讓未完成比賽的來源 checksum 不符。續訓提示這個問題時，再走明確的[重啟流程](cheatsheet.zh-TW.md)。不要混用新舊程式碼的結果，也不要自動重啟 gate。
 
-Checkpoint 格式 2 保存有界 replay、進行中棋局與計畫／策略，以及權重、optimizer、待 metrics／更新、計數器及 RNG。拒絕舊格式，不提供舊 run 匯入器或永久已完成棋局封存。
+## 時間數字怎麼看？
 
-先保存 checkpoint，再發布摘要／metrics；發布失敗時可由 checkpoint 重試。保留原子寫入、獨占 run lock、磁碟上限、不可變模型及 gate 棋譜檢查，不加入默默刪檔行為。
+搜尋時間包含戰術和特徵準備。推論時間包含傳輸和等結果，不只是 GPU kernel。學習、存檔另外計時。權重同步／載入不算在暖機後的搜尋中位數，但會算進整個效能測試程序的預算。
 
-## 量測限制
-
-原生時間分開統計搜尋／戰術／特徵的實際時間與推論時間。推論包含必要 CPU／GPU 傳輸及等待輸出，不只是 GPU kernel 活動。Learner 及 checkpoint 時間另以高精度時鐘量測；建置後的程序啟動及權重刷新計入外層測試程序預算，不計入暖機後穩態搜尋中位數。
-
-更多工作執行緒可能改善大批次、降低小批次效率。依[實測結果](migration-validation.zh-TW.md)選設定，不只看 CPU／GPU 使用率。長期棋力比較仍由使用者執行。
-
-遊戲理論背景：[五子棋先手必勝與價值 loss 的意義](gomoku-first-player.zh-TW.md)。
+最近的存檔頻率比較，把 checkpoint 次數從 12 降到 2，短時間吞吐量約快 38%。這不是新的搜尋速度或棋力結果，詳見[訓練量測與回歸檢查](selfplay-training-guidance-2026.zh-TW.md)。多執行緒可能幫到大批次，也可能拖慢小批次；選設定請看[實測結果](migration-validation.zh-TW.md)，別只看使用率。

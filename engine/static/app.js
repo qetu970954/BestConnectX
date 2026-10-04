@@ -19,7 +19,7 @@ function plot(id, rows, keys, percent = false) {
     root.append(svg('line', {x1: pad, x2: w - pad, y1: y(value), y2: y(value), stroke: '#344246'}));
     root.append(svg('text', {x: 2, y: y(value) + 4, fill: '#9aa9a7', 'font-size': 11}, percent ? `${Math.round(value * 100)}%` : value.toFixed(2)));
   }
-  if (percent) root.append(svg('line', {x1: pad, x2: w - pad, y1: y(.5), y2: y(.5), stroke: '#d3b477', 'stroke-dasharray': '6 5'}));
+  if (percent) root.append(svg('line', {x1: pad, x2: w - pad, y1: y(.55), y2: y(.55), stroke: '#d3b477', 'stroke-dasharray': '6 5'}));
   const colors = ['#cff394', '#78c9f0', '#ef9565'];
   keys.forEach((key, series) => {
     const points = rows.flatMap((row, i) => Number.isFinite(row[key]) ? [`${x(i)},${y(row[key])}`] : []);
@@ -81,7 +81,7 @@ function render() {
   for (const [id, key] of [['games', 'games'], ['updates', 'updates'], ['replay', 'replay_positions']]) $(id).textContent = Number(state[key] || 0).toLocaleString();
   $('storage').textContent = `${(Number(state.artifact_bytes || 0) / 2**30).toFixed(2)} GiB`;
   $('incumbent').textContent = state.incumbent?.label || state.incumbent?.id || '尚無里程碑模型；啟發式預覽';
-  $('message').textContent = state.message || 'Loss 僅供診斷；是否升級以 100 場實戰得分為準。';
+  $('message').textContent = state.message || 'Loss 僅供診斷；100 場得分至少 55% 才可暫定升級。';
   $('milestone').textContent = `下一個模型：${Number(state.next_milestone || 1000).toLocaleString()} 場 · ${Math.ceil((state.remaining_seconds || 0) / 60)} 分鐘剩餘 · 時間目標 80/20（評估已用 ${(100 * Number(state.evaluation_share || 0)).toFixed(1)}%）· 同時 ${state.parallel || 64} 盤`;
   const selfplay = history.selfplay || {window: 1000, games: 0, source_counts: {}};
   $('selfplay-window').textContent = `${selfplay.games.toLocaleString()} / ${selfplay.window.toLocaleString()}`;

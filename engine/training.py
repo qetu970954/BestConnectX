@@ -15,10 +15,11 @@ from .network import Network, device_for
 from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
                       save_checkpoint, save_json, unlink, usage)
 from .selfplay import selfplay_samples, train_step
-from .runtime import DEFAULT_RULES, Game, Rules, selfplay_batch, turn_action, model_for, opening as native_opening, backend as native_backend
+from .runtime import DEFAULT_RULES, Game, Rules, selfplay_batch, turn_action, opening as native_opening, backend as native_backend
 from . import native
 
 GATE_GAMES = 100
+PROMOTION_SCORE = .55
 SOURCE_FILES = ["engine/game.py", "engine/training.py", "engine/network.py", "engine/search.py",
                 "engine/selfplay.py", "engine/tactics.py", "engine/tss.py", "engine/storage.py",
                 "engine/native.py", "engine/native.cpp", "engine/runtime.py", "engine/runtime.cpp",
@@ -39,10 +40,10 @@ def digest(path):
 
 def _replay_window(state):
     """Replay is checkpoint-owned; never rebuild it by scanning game archives."""
-    return state.get('replay', [])[-state['settings'].get('replay_limit', 20_000):]
+    return state.get('replay', [])[-state['settings'].get('replay_limit', 50_000):]
 
 
-def load_state(path, rules=None, *, restore_replay=True):
+def load_state(path, rules=None):
     state = load_checkpoint(path)
     recorded = Rules(**state["rule_config"]) if "rule_config" in state else None
     if (state.get("format") != 2 or recorded is None or state.get("rules") != recorded.id
@@ -50,8 +51,6 @@ def load_state(path, rules=None, *, restore_replay=True):
             or state["config"].get("width", state["config"]["size"]) != recorded.width
             or (rules is not None and rules != recorded)):
         raise ValueError("Checkpoint rules do not match this run. Use a separate --data directory.")
-    if restore_replay and "replay" not in state and "active" in state:
-        state["replay"] = _replay_window(state)
     return state
 
 
@@ -78,17 +77,15 @@ def network(root, entry, device, rules, *, cache=None):
     return net
 
 
-def _source():
-    payloads = {name: (PROJECT / name).read_bytes() for name in SOURCE_FILES}
-    sha = hashlib.sha256(b"".join(name.encode() + value for name, value in payloads.items())).hexdigest()
-    return payloads, sha
+def _code_sha256():
+    return hashlib.sha256(b"".join(name.encode() + (PROJECT / name).read_bytes()
+                                  for name in SOURCE_FILES)).hexdigest()
 
 
 def _environment():
     native_backend()  # Refuse a production run without the native engine.
-    _, sha = _source()
     return {'python': sys.version, 'platform': platform.platform(), 'torch': str(torch.__version__),
-            'numpy': np.__version__, 'cuda_build': torch.version.cuda, 'code_sha256': sha,
+            'numpy': np.__version__, 'cuda_build': torch.version.cuda, 'code_sha256': _code_sha256(),
             'native_backend': {'kind': 'cpp-libtorch', 'binary_sha256': digest(native.library_path())}}
 
 
@@ -108,10 +105,6 @@ def _flush_exports(root, games, metrics, cap):
         name = f"metrics/updates-{metrics[0]['step']:09d}-{metrics[-1]['step']:09d}.json"
         _immutable_json(root, name, metrics, cap)
     metrics.clear()
-
-
-def _new_game(rules, rng):
-    return native_opening(0, int(rng.integers(0, 2**63)), rules, random_start=True)
 
 
 def opening(index, seed, rules=DEFAULT_RULES):
@@ -142,7 +135,20 @@ def verify_gate(report, rules):
                 or row["score"] != (game.winner * color + 1) / 2):
             raise ValueError("Invalid gate history, opening, color, or terminal score.")
     gate_summary(report)
-    return report["score"] > .5 and report["max_turn_overrun_seconds"] <= .1
+    return report["score"] >= PROMOTION_SCORE and report["max_turn_overrun_seconds"] <= .1
+
+
+def _export_best(root, entry, cap):
+    """Export the authoritative manifest's frozen model; retry a failed mirror write on resume."""
+    if not entry.get("file"):
+        return
+    payload = artifact(root, entry["file"]).read_bytes()
+    sha = hashlib.sha256(payload).hexdigest()
+    if entry.get("sha256") and sha != entry["sha256"]:
+        raise ValueError("A frozen model's checksum changed; refusing to export best.")
+    path = root / "best.pt"
+    if not path.exists() or digest(path) != sha:
+        atomic_bytes(path, payload, cap, root=root)
 
 
 def _finish_gate(root, path, report, rules, cap):
@@ -155,11 +161,12 @@ def _finish_gate(root, path, report, rules, cap):
             pass  # A previous process published the manifest but stopped before clearing the pending gate.
         elif current.get("file") == previous.get("file") and current.get("sha256") == previous.get("sha256"):
             best = {**report["candidate"], "kind": "network", "rules": rules.id,
-                    "label": f"Accepted model · {report['candidate']['games']} self-play games",
+                    "label": f"Accepted model (provisional) · {report['candidate']['games']} self-play games",
                     "gate": path.name, "previous": {k: v for k, v in previous.items() if k != "previous"}}
             save_json(root / "incumbent.json", best, root=root, cap=cap)
         else:
             raise ValueError("Incumbent changed during a frozen gate; refusing promotion.")
+        _export_best(root, report["candidate"], cap)
         report["promoted"] = True
     report["decision_recorded"] = True
     save_json(path, report, root=root, cap=cap)
@@ -174,7 +181,8 @@ def _gate_report(rules, candidate, opponent, settings, code_sha):
     report = {"rules": rules.id, "rule_config": rules.to_dict(), "candidate": candidate,
         "opponent": {k: v for k, v in opponent.items() if k != "previous"},
         "opening_seed": 90_000_000 + candidate["games"], "seconds_per_turn": settings["gate_seconds"],
-        "simulations": settings["simulations"], "matches": [], "current": None,
+        "simulations": settings["simulations"], "promotion_score_threshold": PROMOTION_SCORE,
+        "matches": [], "current": None,
         "max_turn_overrun_seconds": 0., "elapsed_seconds": 0., "promoted": False, "code_sha256": code_sha}
     gate_summary(report)
     return report
@@ -237,7 +245,7 @@ def run_gate(root, name, rules, device, deadline, stopped, cap, status=lambda *_
         raise ValueError("Gate rules changed.")
     if report.get("decision_recorded"):
         return report
-    if report["code_sha256"] != _source()[1]:
+    if report["code_sha256"] != _code_sha256():
         raise ValueError("Search code changed during a gate. Restore the saved source or use train --restart-gate to archive and restart it.")
     candidate = network(root, report["candidate"], device, rules, cache=model_cache)
     opponent = network(root, report["opponent"], device, rules, cache=model_cache)
@@ -298,7 +306,7 @@ def train(args):
 
 
 def _train(args, root, rules):
-    saved = load_state(root / "latest.pt", rules, restore_replay=False) if (root / "latest.pt").exists() else None
+    saved = load_state(root / "latest.pt", rules) if (root / "latest.pt").exists() else None
     manifest = load_json(root / "incumbent.json")
     run_info = load_json(root / "run.json") or load_json(root / "rules.json")
     if ((run_info and run_info["rules"] != rules.id)
@@ -309,7 +317,7 @@ def _train(args, root, rules):
         "simulations": args.simulations, "parallel": args.parallel or 64, "batch": args.batch, "seed": args.seed,
         'bootstrap_games': getattr(args, 'bootstrap_games', 16),
         'updates_per_cycle': getattr(args, 'updates_per_cycle', 32),
-        'replay_limit': getattr(args, 'replay_limit', 20_000),
+        'replay_limit': getattr(args, 'replay_limit', 50_000),
         'learning_rate': getattr(args, 'learning_rate', .001), 'workers': getattr(args, 'workers', None) or 6,
         "tactical_ms": args.tactical_ms, "snapshot_every": args.snapshot_every,
         "gate_seconds": args.seconds if args.seconds is not None else .25}
@@ -335,6 +343,8 @@ def _train(args, root, rules):
         report = load_json(root / gate)
         if not report.get("decision_recorded") and report["code_sha256"] != environment["code_sha256"]:
             raise ValueError("Pending gate code changed. Use --restart-gate to archive/restart it, or restore its source.")
+    if manifest and manifest.get("kind") == "network":
+        _export_best(root, manifest, cap)
     device = device_for(args.device)
     torch.manual_seed(settings["seed"])
     rng = np.random.default_rng(settings["seed"])
@@ -356,7 +366,7 @@ def _train(args, root, rules):
         if device.type == "cuda" and saved.get("cuda_rng") is not None:
             torch.cuda.set_rng_state_all(saved["cuda_rng"])
         games, steps, since_update = saved["games"], saved["step"], saved["since_update"]
-        replay = saved["replay"] if "replay" in saved else _replay_window(saved)
+        replay = _replay_window(saved)
         active = saved["active"]
         last_milestone, gate = saved["last_milestone"], saved["gate"]
         summaries, pending_metrics = saved.get('summaries', []), saved['pending_metrics']
@@ -383,8 +393,9 @@ def _train(args, root, rules):
     gate_models = {}  # Only the current gate's two frozen networks; never checkpointed.
 
     def checkpoint():
-        state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
+        nonlocal last_save
         begin = time.perf_counter()
+        state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
         state.update(replay=replay, summaries=summaries, timings=timings,
             optimizer=optimizer.state_dict(), settings=settings, since_update=since_update,
             active=active, last_milestone=last_milestone, gate=gate, phase_seconds=phase_seconds,
@@ -394,8 +405,9 @@ def _train(args, root, rules):
         save_checkpoint(root / "latest.pt", state, cap, root=root)
         _flush_exports(root, summaries, pending_metrics, cap)
         timings['checkpoint_seconds'] += time.perf_counter() - begin
+        last_save = time.monotonic()
 
-    def status(phase, message="Training is CLI-controlled."):
+    def status(phase, message=""):
         nonlocal last_status
         now = time.monotonic()
         if phase not in ("paused", "error") and now - last_status < 3:
@@ -411,7 +423,12 @@ def _train(args, root, rules):
             "artifact_bytes": usage(root), "cap_bytes": cap, "updated_at": time.time()}
         # Atomic writers reserve 1 MiB for status/recovery metadata, even when the artifact cap is reached.
         save_json(root / "status.json", payload)
-        print(f"{phase}: {games} games | {steps} updates | {len(replay)} replay | {message}", flush=True)
+        progress = f"{phase}: {games} games | {steps} updates | {len(replay)} replay"
+        if loss_metrics:
+            progress += (f" | loss {loss_metrics['loss']:.4f}"
+                         f" (policy {loss_metrics['policy_loss']:.4f}, value {loss_metrics['value_loss']:.4f})")
+        progress += f" | next {payload['next_milestone']} | {payload['remaining_seconds']:.0f}s left"
+        print(progress + (f" | {message}" if message else ""), flush=True)
 
     def milestone():
         nonlocal last_milestone, gate
@@ -430,6 +447,7 @@ def _train(args, root, rules):
         if opponent.get("kind") != "network" or opponent.get("file") == filename:
             save_json(root / "incumbent.json", {**candidate, "kind": "network", "rules": rules.id,
                 "initial_baseline": True, "label": "Initial milestone baseline; strength not validated"}, root=root, cap=cap)
+            _export_best(root, candidate, cap)
         if gate is None:
             gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
         last_milestone = games
@@ -466,10 +484,11 @@ def _train(args, root, rules):
                     loss_metrics = metric
                     pending_metrics.append({"step": steps, "games": games, **metric})
                     status("optimizing")
+                    if time.monotonic() - last_save >= 60:
+                        checkpoint()
                 if not pending:
                     since_update = 0
                     settings.pop("pending_updates", None)
-                checkpoint()
             elif games >= last_milestone + settings["snapshot_every"]:
                 checkpoint()  # Durable weights and dataset precede publishing an immutable snapshot.
                 milestone()
@@ -477,7 +496,7 @@ def _train(args, root, rules):
                 break
             else:
                 while len(active) < settings["parallel"]:
-                    game = _new_game(rules, rng)
+                    game = native_opening(0, int(rng.integers(0, 2**63)), rules, random_start=True)
                     active.append({'moves': game.moves, 'samples': [], 'source_counts': {},
                                    'strategies': [None, None], 'plans': [[], []]})
                     boards.append(game)
@@ -485,13 +504,15 @@ def _train(args, root, rules):
                 slots = [0 if game.player == 1 else 1 for game in batch_boards]
                 strategies = [row["strategies"][slot] for row, slot in zip(active, slots)]
                 plans = [list(row["plans"][slot]) for row, slot in zip(active, slots)]
+                measured = {}
                 decisions = selfplay_batch(batch_boards, net, settings["simulations"], rng,
                     bootstrap=games < settings["bootstrap_games"], tactical_ms=settings["tactical_ms"],
-                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans, workers=settings['workers'])
+                    deadline=deadline, stopped=stopped, strategies=strategies, plans=plans,
+                    workers=settings['workers'], metrics=measured)
                 if decisions is None or stopped():
                     phase_seconds[phase] += time.monotonic() - began
                     break
-                for key, value in model_for(net).timings.items():
+                for key, value in measured.items():
                     timings[key] += value
                 ceiling = last_milestone + settings["snapshot_every"]
                 if args.max_games:
@@ -531,7 +552,6 @@ def _train(args, root, rules):
             phase_seconds[phase] += time.monotonic() - began
             if time.monotonic() - last_save >= 60:
                 checkpoint()
-                last_save = time.monotonic()
         checkpoint()
         status("paused", "Saved. Run the same CLI command to resume; Ctrl+C requests a safe stop.")
     except Exception as exc:
