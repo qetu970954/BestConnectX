@@ -83,7 +83,7 @@ Tied MCTS visit counts use the model's prior; exact prior ties and equivalent ta
 | `selfplay-stats.json`, `metrics/` | Recent game summaries and loss history |
 | `gate-model-*.json`, `gate-archive/` | Resumable tournament histories and archived comparisons |
 
-`latest.pt` autosaves about **every 60 seconds at safe boundaries**, plus startup, milestone, and normal-stop saves. Long operations can delay it. A power failure or forced kill loses work since the last complete save.
+`latest.pt` saves **once per model milestone** (normally every 1,000 completed games) and on a safe stop. Starting or resuming does not rewrite it, and there are no timed saves between milestones. Live progress still updates; game summaries and loss history are published with the checkpoint. A power failure or forced kill loses work since the last complete save.
 
 Saves use atomic replacement. The default disk cap is **20 GiB**: if it fills, training stops rather than silently deleting old models. Finished self-play move histories are not archived; recent samples and unfinished games stay in the checkpoint. Tournament histories are retained for verification. If a `best.pt` export is interrupted, resume repairs it from `incumbent.json`.
 

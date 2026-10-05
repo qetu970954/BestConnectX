@@ -12,7 +12,7 @@ The implemented policy is:
 | --- | --- |
 | Main goal | Playing strength comes before CPU/GPU utilization |
 | Self-play actor | Newest learner; a failed promotion does not roll it back |
-| Recovery | Full `latest.pt` about every 60 seconds at safe boundaries, plus startup, milestones, and normal stop |
+| Recovery | Full `latest.pt` once per model milestone and on safe stop; no startup/resume rewrite or timed saves |
 | Milestones | Frozen model-only exports every 1,000 completed games; numbers count games, not updates |
 | Tournament candidate | Newest frozen milestone when a comparison starts; skip older waiting candidates and finish active comparisons without switching models |
 | Best | `incumbent.json` selects the accepted milestone; `best.pt` mirrors it atomically |
@@ -28,9 +28,11 @@ Later user requests changed replay capacity and tournament candidate selection. 
 
 The eight-view, 400,000-entry default is user-selected, not a measured strength improvement. Learning batch size is unchanged. Historical profiling and trials below used 20,000 original positions; those measurements have not been repeated with the larger stored buffer.
 
+Milestone-only saves replaced periodic saves to reduce checkpointing and export overhead. Full recovery now saves once at 1,000, 2,000, 3,000 games, etc., plus safe stop. The checkpoint precedes model publication, and resume repairs an interrupted milestone export without retraining. Live status still updates; summaries and loss history publish with checkpoints. Forced shutdown can lose work since the previous milestone. The historical speed comparison below does not measure this newer cadence.
+
 The 55-point rule is a quick, provisional regression filter—not statistical proof of improvement. A rejected model can still generate training samples. Protecting best does not remove those samples or prove they are better data.
 
-The earlier measurement approval covered disposable copies and at most **300 seconds of combined GPU-program duration**, including startup, loading, and warmup. It did not authorize persistent training or long strength tournaments.
+The measurement approval covered disposable copies and at most **300 seconds of combined GPU-program duration**, including startup, loading, and warmup. It did not authorize persistent training, long strength tournaments, or changes to original run files. Personal run-management activity is omitted.
 
 ## What the research supports—and what it doesn't
 
@@ -65,7 +67,7 @@ A disposable CPU profile of the 20,000-position checkpoint measured these median
 | Durable disk write | 0.0383 |
 | Complete save | 1.2383 |
 
-Serialization dominated. We removed redundant save calls, **not** `fsync`, atomic replacement, optimizer/replay state, disk caps, or recovery checks. Safe boundaries still allow timed saves within long learning cycles. The next interval starts after a successful save finishes. Milestone publication keeps its recovery checkpoints.
+Serialization dominated. That earlier fix removed redundant save calls while retaining timed saves. The current milestone-only policy also removes those timers and duplicate milestone saves. `fsync`, atomic replacement, optimizer/replay state, disk caps, and recovery checks remain.
 
 ## The short CUDA comparison
 
@@ -110,8 +112,9 @@ Use a fresh directory: resume restores the old batch even if you pass `--batch 2
 
 Tests check the cause, not a hardware-dependent 207 games/minute threshold:
 
-- A short CPU run performs several learning cycles without a due autosave/milestone. It must write **two** full checkpoints: startup and shutdown. The guard passed with the fix and failed against old code with five writes.
-- Slow-update tests check timed autosaves, saved pending updates, and resume. Saving resets the timer at completion rather than triggering duplicate cycle saves.
+- A short CPU run performs several learning cycles before its first milestone and writes **one** full checkpoint on stop.
+- Slow-update tests cross the former 60-second interval without a timed save, then verify that safe stop and resume retain pending updates.
+- A three-milestone run writes exactly three full checkpoints, including a stop at the final milestone. Interrupted model or baseline publication resumes from the durable checkpoint without retraining.
 - Other tests keep immutable milestones, full latest recovery, model-only best exports, interrupted-export repair, the exact 55-point boundary, overtime/history checks, disk caps, and failed-publication recovery.
 - CLI checks require useful loss/milestone/time fields, no invented pre-update loss, and retained gate/error/save messages. Chrome checks cover the 55% chart reference and stable layout.
 

@@ -121,7 +121,7 @@ This prints summary JSON. It does not update weights, save game records, or prov
 
 ## Saves and tournaments, in plain terms
 
-- **`latest.pt`: continue learning.** Full state, including optimizer, recent samples, and unfinished games. Autosaves about every 60 seconds at safe boundaries, plus startup, milestones, and normal stop. Long operations can delay it.
+- **`latest.pt`: continue learning.** Full state, including optimizer, recent samples, and unfinished games. Saves once with each model milestone (normally every 1,000 completed games) and on safe stop. No startup/resume rewrite or timed saves; forced shutdown loses work since the last save.
 - **Numbered milestones: keep a fixed opponent.** `models/model-00001000.pt` means 1,000 completed self-play games, not 1,000 updates. It cannot recover the full learner.
 - **`best.pt`: play with the accepted model.** `incumbent.json` decides which milestone it mirrors. Resume repairs interrupted exports. The first milestone is an unvalidated baseline.
 - **Later promotions: at least 55 points in 100 games.** Fifty paired openings, swapped colors, checked histories, and maximum full-turn overtime of 0.1 seconds. A win earns 1 and a draw 0.5. This is a provisional filter, not proof of strength.

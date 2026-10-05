@@ -390,11 +390,12 @@ def _train(args, root, rules):
     start = time.monotonic()
     deadline = start + args.hours * 3600
     stopped = lambda: interrupted[0] or stop_file.exists() or time.monotonic() >= deadline
-    last_save = last_status = start
+    last_status = start
+    checkpoint_needed = True
     gate_models = {}  # Only the current gate's two frozen networks; never checkpointed.
 
     def checkpoint():
-        nonlocal last_save
+        nonlocal checkpoint_needed
         begin = time.perf_counter()
         state = {**(saved or {}), **snapshot(net, steps, rules, games)}  # Preserve older checkpoint fields.
         state.update(replay=replay, summaries=summaries, timings=timings,
@@ -406,7 +407,7 @@ def _train(args, root, rules):
         save_checkpoint(root / "latest.pt", state, cap, root=root)
         _flush_exports(root, summaries, pending_metrics, cap)
         timings['checkpoint_seconds'] += time.perf_counter() - begin
-        last_save = time.monotonic()
+        checkpoint_needed = False
 
     def status(phase, message=""):
         nonlocal last_status
@@ -431,8 +432,11 @@ def _train(args, root, rules):
         progress += f" | next {payload['next_milestone']} | {payload['remaining_seconds']:.0f}s left"
         print(progress + (f" | {message}" if message else ""), flush=True)
 
-    def milestone():
+    def milestone(*, save=True):
         nonlocal last_milestone
+        last_milestone = games
+        if save:
+            checkpoint()  # Full recovery precedes publication; resume retries an interrupted export.
         filename = f"models/model-{games:08d}.pt"
         path = artifact(root, filename)
         if not path.exists():
@@ -445,15 +449,16 @@ def _train(args, root, rules):
             raise ValueError("An immutable milestone already exists with different weights.")
         candidate = {"id": path.stem, "file": filename, "sha256": digest(path), "games": games, "step": steps}
         opponent = load_json(root / "incumbent.json", {})
-        if opponent.get("kind") != "network" or opponent.get("file") == filename:
+        if opponent.get("kind") != "network":
             save_json(root / "incumbent.json", {**candidate, "kind": "network", "rules": rules.id,
                 "initial_baseline": True, "label": "Initial milestone baseline; strength not validated"}, root=root, cap=cap)
             _export_best(root, candidate, cap)
-        last_milestone = games
-        checkpoint()
 
     try:
-        checkpoint()
+        if (saved and games and games == last_milestone
+                and (not (root / f"models/model-{games:08d}.pt").exists()
+                     or (manifest or {}).get("kind") != "network")):
+            milestone(save=False)
         while not stopped():
             began, phase = time.monotonic(), "training"
             credit = eval_allowance(phase_seconds)
@@ -461,6 +466,7 @@ def _train(args, root, rules):
                 gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
             if gate and credit >= max(1., load_json(root / gate)["seconds_per_turn"] + .05):
                 phase = "evaluation"
+                checkpoint_needed = True
                 # ponytail: serial gate slices; batch evaluation only if search throughput requires it.
                 until = min(deadline, began + min(credit, max(2., settings["gate_seconds"] + .05)))
                 gate_stopped = lambda: stopped() or time.monotonic() >= until
@@ -470,6 +476,7 @@ def _train(args, root, rules):
                     gate = None
                     gate_models.clear()
             elif since_update >= 8 or (games >= last_milestone + settings["snapshot_every"] and since_update):
+                checkpoint_needed = True
                 # Preserve learning work when a larger batch finishes more than eight games at once.
                 pending = settings.get("pending_updates", settings["updates_per_cycle"] * max(1, (since_update + 7) // 8))
                 while pending and not stopped():
@@ -483,17 +490,15 @@ def _train(args, root, rules):
                     loss_metrics = metric
                     pending_metrics.append({"step": steps, "games": games, **metric})
                     status("optimizing")
-                    if time.monotonic() - last_save >= 60:
-                        checkpoint()
                 if not pending:
                     since_update = 0
                     settings.pop("pending_updates", None)
             elif games >= last_milestone + settings["snapshot_every"]:
-                checkpoint()  # Durable weights and dataset precede publishing an immutable snapshot.
                 milestone()
             elif args.max_games and games >= args.max_games:
                 break
             else:
+                checkpoint_needed = True
                 while len(active) < settings["parallel"]:
                     game = native_opening(0, int(rng.integers(0, 2**63)), rules, random_start=True)
                     active.append({'moves': game.moves, 'samples': [], 'source_counts': {},
@@ -549,9 +554,8 @@ def _train(args, root, rules):
                 active, boards = survivors, live
                 status("bootstrap" if games < settings["bootstrap_games"] else "self_play")
             phase_seconds[phase] += time.monotonic() - began
-            if time.monotonic() - last_save >= 60:
-                checkpoint()
-        checkpoint()
+        if checkpoint_needed:
+            checkpoint()
         status("paused", "Saved. Run the same CLI command to resume; Ctrl+C requests a safe stop.")
     except Exception as exc:
         status("error", f"{type(exc).__name__}: {exc}. Previous checkpoint retained.")

@@ -255,8 +255,7 @@ class EngineTests(unittest.TestCase):
             self.assertIn('square', result.stderr)
             self.assertEqual((Path(name) / 'latest.pt').read_bytes(), original)
 
-    def test_short_run_saves_replay_twice_not_after_every_optimization_cycle(self):
-        # CUDA comparison: 12 full saves before the fix, 2 after; assert cadence, not hardware speed.
+    def test_short_run_saves_replay_only_on_stop_before_first_milestone(self):
         with tempfile.TemporaryDirectory() as name:
             args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
                 simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=1000,
@@ -268,15 +267,14 @@ class EngineTests(unittest.TestCase):
                 training.train(args)
             latest = [call for call in writes.call_args_list if call.args[0].name == 'latest.pt']
             self.assertGreater(updates.call_count, 32)  # Several learning cycles really executed.
-            self.assertEqual(len(latest), 2, 'A short run must not serialize replay after each learning cycle.')
-            self.assertEqual([call.args[1]['games'] for call in latest], [0, 24])
+            self.assertEqual([call.args[1]['games'] for call in latest], [24])
             saved = training.load_state(Path(name) / 'latest.pt')
             self.assertEqual((saved['games'], saved['step']), (24, updates.call_count))
             self.assertTrue(saved['replay'])
             self.assertGreater(saved['timings']['cpu_search_seconds'], 0.)
-            self.assertFalse((Path(name) / 'models').exists())  # No milestone or timed autosave was due.
+            self.assertFalse((Path(name) / 'models').exists())
 
-    def test_autosave_keeps_pending_updates_without_duplicate_cycle_saves(self):
+    def test_slow_update_skips_timed_save_and_stop_keeps_pending_updates(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
@@ -290,25 +288,28 @@ class EngineTests(unittest.TestCase):
                 return result
             def step(*a, **kw):
                 result = original_step(*a, **kw)
-                clock[0] += 61.  # A slow update exceeds the autosave interval and session deadline.
+                clock[0] += 61.  # Exceeds the former autosave interval and session deadline.
                 return result
             def save(path, state, *a, **kw):
                 if path.name == 'latest.pt':
                     saves.append((clock[0], state['step']))
                 original_save(path, state, *a, **kw)
-                clock[0] += 7.  # Measure the next interval from save completion, not its start.
+                clock[0] += 7.
             with patch.object(training.time, 'monotonic', lambda: clock[0]), \
                     patch.object(training, 'selfplay_batch', batch), \
                     patch.object(training, 'train_step', step), \
                     patch.object(training, 'save_checkpoint', save), patch('builtins.print'):
                 training.train(args)
-            self.assertEqual([step for _, step in saves], [0, 1, 1])  # Startup, timed autosave, shutdown.
+            self.assertEqual([step for _, step in saves], [1])  # Shutdown only.
             saved = training.load_state(root / 'latest.pt')
             self.assertEqual((saved['games'], saved['step'], saved['settings']['pending_updates']), (8, 1, 31))
             self.assertTrue(saved['replay'])
             with patch.object(training, 'selfplay_batch', side_effect=AssertionError('No new games expected')), \
+                    patch.object(training, 'save_checkpoint', wraps=training.save_checkpoint) as resumed_writes, \
                     patch('builtins.print'):
                 training.train(args)
+            self.assertEqual([call.args[1]['step'] for call in resumed_writes.call_args_list
+                              if call.args[0].name == 'latest.pt'], [32])  # No rewrite when resuming.
             resumed = training.load_state(root / 'latest.pt')
             self.assertEqual((resumed['games'], resumed['step'], resumed['since_update']), (8, 32, 0))
             self.assertNotIn('pending_updates', resumed['settings'])
@@ -346,6 +347,45 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(history(Path(name))['selfplay']['games'], 8)
             self.assertFalse((Path(name) / 'selfplay').exists())
             self.assertFalse((Path(name) / 'replay').exists())
+
+    def test_interrupted_milestone_publication_resumes_without_retraining(self):
+        for failed_artifact in ('model', 'incumbent'):
+            with self.subTest(failed_artifact=failed_artifact), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
+                    simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=8,
+                    seconds=.25, hours=.01, max_games=8, channels=4, blocks=1, workers=1)
+                original_checkpoint, original_json = training.save_checkpoint, training.save_json
+                def checkpoint(path, state, *a, **kw):
+                    if failed_artifact == 'model' and path.parent.name == 'models':
+                        raise OSError('interrupted milestone model export')
+                    return original_checkpoint(path, state, *a, **kw)
+                def write_json(path, value, **kw):
+                    if failed_artifact == 'incumbent' and path.name == 'incumbent.json' and value['kind'] == 'network':
+                        raise OSError('interrupted baseline publication')
+                    return original_json(path, value, **kw)
+                with patch.object(training, 'save_checkpoint', checkpoint), \
+                        patch.object(training, 'save_json', write_json), patch('builtins.print'):
+                    with self.assertRaises(OSError):
+                        training.train(args)
+                durable = training.load_state(root / 'latest.pt')
+                self.assertEqual((durable['games'], durable['last_milestone']), (8, 8))
+                with patch.object(training, 'train_step', side_effect=AssertionError('No retraining expected')), \
+                        patch.object(training, 'selfplay_batch', side_effect=AssertionError('No new games expected')), \
+                        patch('builtins.print'):
+                    training.train(args)
+                frozen = training.load_state(root / 'models/model-00000008.pt')
+                self.assertEqual(frozen['step'], durable['step'])
+                for key, value in durable['weights'].items():
+                    torch.testing.assert_close(frozen['weights'][key], value, rtol=0, atol=0)
+                manifest = json.loads((root / 'incumbent.json').read_text())
+                self.assertTrue(manifest['initial_baseline'])
+                self.assertEqual((root / 'best.pt').read_bytes(), (root / manifest['file']).read_bytes())
+                manifest['initial_baseline'] = False
+                save_json(root / 'incumbent.json', manifest)
+                with patch('builtins.print'):
+                    training.train(args)
+                self.assertFalse(json.loads((root / 'incumbent.json').read_text())['initial_baseline'])
 
     def test_frozen_gate_resumes_100_legal_color_pairs_and_checks_promotion(self):
         device = device_for('cpu')
@@ -473,9 +513,13 @@ class EngineTests(unittest.TestCase):
                 simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=8,
                 seconds=.25, hours=.01, max_games=24, channels=4, blocks=1, workers=1)
             with patch.object(training, 'eval_allowance', return_value=0.), \
-                    patch.object(training, 'next_gate', wraps=training.next_gate) as gates, patch('builtins.print'):
+                    patch.object(training, 'next_gate', wraps=training.next_gate) as gates, \
+                    patch.object(training, 'save_checkpoint', wraps=training.save_checkpoint) as writes, \
+                    patch('builtins.print'):
                 training.train(args)
             gates.assert_not_called()  # Exporting a milestone must not reserve an outdated candidate.
+            latest = [call.args[1]['games'] for call in writes.call_args_list if call.args[0].name == 'latest.pt']
+            self.assertEqual(latest, [8, 16, 24])  # One full save per milestone, including the final boundary.
             saved = training.load_state(root / 'latest.pt')
             self.assertEqual(saved['games'], 24)
             self.assertIsNone(saved['gate'])
