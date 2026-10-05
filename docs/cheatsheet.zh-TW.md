@@ -35,7 +35,13 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 
 Ctrl+C 也會要求安全停止。**看到 Saved 後再關終端機。** 兩小時限制算的是訓練迴圈，啟動和最後存檔還會多花一點時間。目錄裡已有 checkpoint，就會續訓，不會換成全新模型。想做另一個實驗，請改 `--data`。
 
-Dashboard 網址是 **http://127.0.0.1:8765**。要跟 bot 下棋，先暫停訓練。方向鍵移動焦點，Enter／Space 落子。第二個 dashboard 可加 `--port 8766`。沒有 CUDA？把 `--device cuda` 換成 `--device cpu`；小型 CPU 檢查也可以加 `--workers 1`。
+Dashboard 網址是 **http://127.0.0.1:8765**。可選 English／繁體中文，瀏覽器會記住選擇。思考時間選單提供每完整回合 **0.5、1、2、4、8、16 秒**。要跟 bot 下棋，先暫停訓練。方向鍵移動焦點，Enter／Space 落子。第二個 dashboard 可加 `--port 8766`。沒有 CUDA？把 `--device cuda` 換成 `--device cpu`；小型 CPU 檢查也可以加 `--workers 1`。
+
+要使用較大的六子棋設定，並保持**每次學習 batch 256**：
+
+```sh
+uv run python train.py --preset connect6 --board-size "15*15" --data data/connect6-15x15-b256-p128 --device cuda --batch 256 --parallel 128 --workers 6 --replay-limit 400000 --hours 2
+```
 
 ### 如果續訓提示未完成 gate 的程式碼已變更
 
@@ -85,13 +91,13 @@ uv run python train.py --preset connect6-attention --board-size "15*15" --data d
 | `--simulations 64` | 每次落子的搜尋模擬數；續訓沿用保存值 |
 | `--channels 64 --blocks 6` | 模型寬度和殘差深度；更改要新 run |
 | `--architecture attention` | 實驗模型設計；預設 `residual` |
-| `--replay-limit 50000` | 近期已完成棋局的局面；新 run 預設 50,000，續訓沿用保存值 |
+| `--replay-limit 400000` | 已存入的對稱視角；預設 400,000 筆＝50,000 個原始局面；續訓沿用保存值 |
 | `--max-games 1000` | 到**累計 1,000 盤**停止，不是再多練 1,000 盤 |
 | `--snapshot-every 1000` | 每幾盤保存固定里程碑；續訓沿用保存值 |
 | `--seconds 0.25` | 比賽每完整回合的時間，不是每顆棋子 |
 | `--disk-gib 20` | 磁碟容量上限；滿了停止，不刪檔 |
 
-新 run 最多保留 **50,000 個 replay 局面**，不是 50,000 盤；滿了會移除最舊局面。更多歷史會增加 RAM 和存檔時間，還沒證明棋力更強。已有 checkpoint 會保留原上限，即使傳另一個 `--replay-limit` 也不會覆寫。
+每個已完成局面會以**八個視角**放入 replay：棋盤和策略一起旋轉／反射，終局結果不變。預設 **400,000 筆**可保留 50,000 個原始局面；學習仍抽設定的 batch 大小。滿了會移除最舊資料。已有 checkpoint 會保留原上限，即使傳另一個 `--replay-limit` 也不會覆寫。
 
 **`--parallel` 和 `--batch` 做的是不同工作。** 改 batch 也會改變舊樣本被重複抽到的頻率。續訓時傳 `--batch 256` 或新的學習率，不會覆寫 checkpoint。這類比較請使用新目錄。詳見[學習率](learning-rates.zh-TW.md)。
 

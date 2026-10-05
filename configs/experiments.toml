@@ -14,7 +14,8 @@ simulations = 64
 batch = 128
 seed = 5070
 learning_rate = 0.001
-replay_limit = 50000
+# All eight board views: 400000 entries retain 50000 original positions.
+replay_limit = 400000
 bootstrap_games = 16
 updates_per_cycle = 32
 tactical_ms = 2.0

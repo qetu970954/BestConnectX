@@ -1,5 +1,4 @@
 """Residual policy/value models with optional pooling and board attention."""
-import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -96,17 +95,3 @@ def device_for(name="auto"):
         raise RuntimeError("CUDA is unavailable. Install a Blackwell-compatible PyTorch build or select CPU.")
     torch.set_num_threads(4)
     return torch.device(name)
-
-
-def augment(features, policy, rng):
-    """Uniformly sample the eight square-board rotations/reflections, with matching policy targets."""
-    size = features.shape[-1]
-    if features.shape[-2] != size:
-        raise ValueError("Eight-way augmentation requires a square board.")
-    k = int(rng.integers(4))
-    flip = bool(rng.integers(2))
-    features = np.rot90(features, k, axes=(-2, -1))
-    policy = np.rot90(policy.reshape(-1, size, size), k, axes=(-2, -1))
-    if flip:
-        features, policy = features[..., ::-1], policy[..., ::-1]
-    return features.copy(), policy.reshape(-1, size * size).copy()

@@ -79,8 +79,8 @@ def main(argv=None):
                           help='New-run model: residual baseline, pooled value, or pooled value plus board attention')
     training.add_argument('--workers', type=int, default=None, help='Native CPU threads; explicit values also apply on resume')
     training.add_argument('--learning-rate', type=float, default=.001)
-    training.add_argument('--replay-limit', type=int, default=50_000,
-                          help='Recent completed-game positions (new-run default: 50000); restored on resume')
+    training.add_argument('--replay-limit', type=int, default=400_000,
+                          help='Replay entries including all 8 board symmetries (default: 400000 = 50000 original positions); restored on resume')
     training.add_argument('--bootstrap-games', type=int, default=16)
     training.add_argument('--updates-per-cycle', type=int, default=32)
     generation = commands.add_parser('selfplay', help='Generate a bounded number of native self-play games without model updates')
@@ -132,7 +132,7 @@ def main(argv=None):
                     or args.architecture not in ARCHITECTURES
                     or (args.architecture == 'attention' and args.channels % 4)
                     or (args.workers is not None and not 1 <= args.workers <= 12)
-                    or not 1 <= args.replay_limit <= 200_000 or not 0 <= args.bootstrap_games <= 10_000
+                    or not 1 <= args.replay_limit <= 400_000 or not 0 <= args.bootstrap_games <= 10_000
                     or not 1 <= args.updates_per_cycle <= 10_000
                     or not math.isfinite(args.learning_rate) or not 0 < args.learning_rate <= .1
                     or not math.isfinite(args.tactical_ms) or not 0 <= args.tactical_ms <= 50

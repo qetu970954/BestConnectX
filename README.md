@@ -16,7 +16,7 @@ uv run python -m engine.native
 uv run python dashboard.py --open-browser
 ```
 
-The dashboard opens at **http://127.0.0.1:8765**. Before you train a model, the bot uses an untrained rule-based heuristic. The dashboard lets you play and inspect results; training runs in a terminal.
+The dashboard opens at **http://127.0.0.1:8765**. Choose **English or 繁體中文** in its language menu; it remembers your choice. Before you train a model, the bot uses an untrained rule-based heuristic. The dashboard lets you play and inspect results; training runs in a terminal.
 
 On Windows, the build needs MSVC x64 C++ tools. It uses the libraries included with PyTorch, so you do not need a separate CUDA SDK or CMake. Windows CPU/CUDA were checked with PyTorch 2.11.0+cu128. The Unix build path needs a C++17 compiler and has not been checked here. Rebuild after changing native code or PyTorch.
 
@@ -56,7 +56,7 @@ If resume reports that an unfinished tournament's code changed, see [`--restart-
 ## What happens during training?
 
 1. The newest model plays games against itself. C++ combines tactical checks with neural MCTS search.
-2. Completed games supply recent training samples, called **replay**. Results come from actual wins, draws, and losses—not unfinished tactical proofs.
+2. Each completed position supplies **all eight rotated/reflected views** to replay. Board and policy move together; the real terminal result stays the same. The new-run limit of **400,000 entries** holds 50,000 original positions. Learning still samples the usual batch size.
 3. Python updates the model using those samples. The CLI calls this phase **optimizing**. It is learning, not a tournament.
 4. Every **1,000 completed games**, the trainer saves a frozen playing model. The filename counts games, not learning updates.
 5. The first milestone becomes the initial best. Each new tournament uses the **newest frozen milestone** against the accepted best, skipping older waiting candidates. An active comparison finishes with its original models; all milestone files are kept.
@@ -68,6 +68,8 @@ This is a practical regression filter, **not proof of stronger play**. Losing th
 Training and evaluation take turns on the GPU. The scheduler aims for roughly **80% training / 20% evaluation**. Without a pending tournament, it spends the time training.
 
 Want the search explained visually? Open [How the bot thinks](figures/how-bot-thinks.html). **MCTS** explores future positions; **PUCT** chooses which branches to explore; **TSS** looks for forced wins that must pass independent checking.
+
+Tied MCTS visit counts use the model's prior; exact prior ties and equivalent tactical choices use seeded randomness. TSS reuses completed searches of the same position and tries attacker horizons **2, 3, then 4**, within the existing time/node limits. A timeout means unknown, so ordinary move selection continues.
 
 ## Which model file should I use?
 
@@ -87,7 +89,7 @@ Saves use atomic replacement. The default disk cap is **20 GiB**: if it fills, t
 
 ## Play, tune, and check
 
-Pause training before asking the dashboard bot to move. Choose best, latest, or a numbered milestone. Connect6 bot moves complete the whole turn. Arrow keys move focus; Enter/Space places a stone. Close the dashboard with Ctrl+C, or use `--port 8766` for another dashboard. Requests stay local and use a same-origin token.
+Pause training before asking the dashboard bot to move. Choose best, latest, or a numbered milestone, and **0.5, 1, 2, 4, 8, or 16 seconds** of thinking time per full turn. Connect6 bot moves complete the whole turn. Arrow keys move focus; Enter/Space places a stone. Close the dashboard with Ctrl+C, or use `--port 8766` for another dashboard. Requests stay local and use a same-origin token.
 
 The starting settings are **6 CPU workers, 64 concurrent games, 64 simulations per placement, and learning batch 128**. These are different controls—not interchangeable batch sizes. More workers or a busier GPU does not automatically mean a stronger bot. The default learning rate is fixed at **0.001**; there is no automatic schedule.
 

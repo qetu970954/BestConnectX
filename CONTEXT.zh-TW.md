@@ -66,7 +66,7 @@ _Avoid_: Latest checkpoint
 _Avoid_: Win rate, Elo
 
 **Replay window**：
-學習使用的有界近期樣本，包含局面、策略目標及真實終局結果。淘汰視窗內舊樣本不代表刪除既有檔案。
+學習使用的有界近期樣本，包含局面、策略目標及真實終局結果。每個已完成的原始局面提供八種對稱視角；replay 上限算的是這些已存入的資料筆數。淘汰視窗內舊樣本不代表刪除既有檔案。
 _Avoid_: Permanent game archive
 
 **Self-play summary**：

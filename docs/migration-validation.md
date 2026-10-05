@@ -80,9 +80,15 @@ This validates the cleanup, not a new speed or strength gain. The earlier [save-
 
 ## Later replay-default change
 
-The user subsequently requested **50,000 replay positions** as the new-run default. TOML, CLI, and training fallbacks now agree. CPU tests cover the CLI fallback without a TOML replay entry, the bounded 50,000-position window, and saved-limit preservation on resume. The separate feature cache remains bounded at 20,000 entries; it is not the replay buffer.
+The user subsequently requested **all eight symmetry views in replay**, with **400,000 entries** retaining 50,000 original positions. TOML, CLI, and training fallbacks agree; batch size is unchanged. CPU tests check the eight board/policy transforms after completed games, the CLI fallback without a TOML replay entry, the bounded 400,000-entry window, and saved-limit preservation on resume. The separate feature cache remains bounded at 20,000 entries; it is not the replay buffer.
 
-All 75 CPU tests passed in 27.871 seconds, and the Chrome CPU smoke check passed. This is functional validation, not a full-capacity speed or strength benchmark. Historical 20,000-position measurements above remain unchanged. The earlier 275-file integrity check applies to the cleanup stage; those old run folders were no longer present for this later check, so it could not be repeated.
+The earlier 50,000-position-default check passed 75 CPU tests in 27.871 seconds and the Chrome smoke check. Historical 20,000-position measurements above remain unchanged. The earlier 275-file integrity check applies to the cleanup stage; those old run folders were no longer present for that later check, so it could not be repeated.
+
+## Eight-view replay and bounded deeper tactics (2026-10-05)
+
+The native engine rebuilt successfully. All **82 tests passed in 44.516 seconds**, and the Chrome smoke check passed for English/Traditional Chinese, saved language preference, the six thinking-time choices, complete bot turns, keyboard/mobile use, and stable board layout.
+
+The checks cover completed-game eight-view storage, unchanged learning batch size, replay limits/resume, prior-based MCTS ties, seeded tactical ties, and independent verification of a legal four-turn Connect6 proof. A missing defense is rejected; node limits and cancellation return unknown. The four-turn fixture uses a 32-cell attack shortlist; normal automatic search keeps its narrower shortlist and existing time/node limits. Earlier passes reserve budget for the deeper attempt. Full-buffer throughput and playing strength remain unmeasured.
 
 ## Run the checks
 

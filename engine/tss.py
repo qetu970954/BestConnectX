@@ -13,6 +13,7 @@ class _Budget:
     def __init__(self, deadline, max_nodes, stopped):
         self.deadline, self.max_nodes, self.stopped = deadline, max_nodes, stopped
         self.nodes = 0
+        self.table = {}
 
     def tick(self):
         if self.nodes >= self.max_nodes or self.stopped() or time.perf_counter() >= self.deadline:
@@ -126,6 +127,14 @@ def _candidates(game, width, max_candidates, budget):
 
 def _search_node(game, attacker, turns_left, width, max_candidates, budget):
     budget.tick()
+    key = (game.board.tobytes(), game.player, game.left, turns_left)
+    if key not in budget.table:
+        # Completed misses are reusable; a limit exception never enters the table.
+        budget.table[key] = _search_position(game, attacker, turns_left, width, max_candidates, budget)
+    return budget.table[key]
+
+
+def _search_position(game, attacker, turns_left, width, max_candidates, budget):
     if game.done or game.player != attacker or turns_left < 1:
         return None
     own = game.threats(attacker, game.left)
@@ -243,12 +252,25 @@ def search_tss(game, *, max_turns=3, deadline, max_nodes=100_000,
         return None
     attacker = game.player
     budget = _Budget(deadline, max_nodes, stopped)
-    try:
-        tree = _search_node(game, attacker, max_turns, width, max_candidates, budget)
-    except _Limit:
-        return None
+    tree = None
+    for horizon in range(min(2, max_turns), max_turns + 1):
+        remaining = max_nodes - budget.nodes
+        now = time.perf_counter()
+        if remaining <= 0 or now >= deadline or stopped():
+            return None
+        last = horizon == max_turns
+        stage = _Budget(deadline if last else now + (deadline - now) / 2,
+                        remaining if last else max(1, remaining // 2), stopped)
+        stage.table = budget.table
+        try:
+            tree = _search_node(game, attacker, horizon, width, max_candidates, stage)
+        except _Limit:
+            tree = None
+        budget.nodes += stage.nodes
+        if tree is not None:
+            break
     if tree is None:
         return None
     if stopped() or time.perf_counter() >= deadline:
         return None
-    return {"version": 1, "attacker": attacker, "max_turns": max_turns, "tree": tree}
+    return {"version": 1, "attacker": attacker, "max_turns": horizon, "tree": tree}

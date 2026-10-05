@@ -114,8 +114,8 @@ class ModelVariantTests(unittest.TestCase):
                 self.assertEqual(first['config']['architecture'], architecture)
                 self.assertEqual(first['config'], second['config'])
                 self.assertEqual(second['games'], 9)
-                self.assertEqual(first['settings']['replay_limit'], 50_000)
-                self.assertEqual(second['settings']['replay_limit'], 50_000)
+                self.assertEqual(first['settings']['replay_limit'], 400_000)
+                self.assertEqual(second['settings']['replay_limit'], 400_000)
                 self.assertGreater(first['step'], 0)
                 self.assertTrue(first['optimizer']['state'])
                 restored = network(root, {'file': 'models/model-00000008.pt'}, torch.device('cpu'),
@@ -142,19 +142,19 @@ class ModelVariantTests(unittest.TestCase):
                 self.assertEqual(args.rules, Rules(15, 15, 6, 2, 1))
                 self.assertEqual((args.data, args.device, args.hours), ('data/connect6-15x15', 'cuda', 2.))
                 self.assertEqual((args.parallel, args.workers, args.batch, args.simulations), (64, 6, 128, 64))
-                self.assertEqual(args.replay_limit, 50_000)
+                self.assertEqual(args.replay_limit, 400_000)
 
     def test_presets_and_attention_width_validation(self):
         defaults, _ = load_options([])
         self.assertEqual({key: defaults[key] for key in ('architecture', 'device', 'workers', 'parallel', 'batch')},
                          {'architecture': 'residual', 'device': 'auto', 'workers': 6, 'parallel': 64, 'batch': 128})
-        self.assertEqual((defaults['channels'], defaults['blocks'], defaults['replay_limit']), (64, 6, 50_000))
+        self.assertEqual((defaults['channels'], defaults['blocks'], defaults['replay_limit']), (64, 6, 400_000))
         with tempfile.TemporaryDirectory() as name, patch('engine.training.train') as train, \
                 patch('engine.cli.load_json', return_value=None):
             config = Path(name) / 'minimal.toml'
             config.write_text('[defaults]\n[presets.gomoku]\n', encoding='utf-8')
             main(['train', '--config', str(config), '--data', name])
-            self.assertEqual(train.call_args.args[0].replay_limit, 50_000)
+            self.assertEqual(train.call_args.args[0].replay_limit, 400_000)
         for game in ('gomoku', 'connect6'):
             for architecture in ('pooled', 'attention'):
                 options, _ = load_options(['--preset', f'{game}-{architecture}'])

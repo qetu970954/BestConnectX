@@ -14,7 +14,7 @@ import torch
 from .network import Network, device_for
 from .storage import (GIB, atomic_bytes, load_checkpoint, load_json, run_lock,
                       save_checkpoint, save_json, unlink, usage)
-from .selfplay import selfplay_samples, train_step
+from .selfplay import selfplay_samples, replay_symmetries, train_step
 from .runtime import DEFAULT_RULES, Game, Rules, selfplay_batch, turn_action, opening as native_opening, backend as native_backend
 from . import native
 
@@ -40,7 +40,7 @@ def digest(path):
 
 def _replay_window(state):
     """Replay is checkpoint-owned; never rebuild it by scanning game archives."""
-    return state.get('replay', [])[-state['settings'].get('replay_limit', 50_000):]
+    return state.get('replay', [])[-state['settings'].get('replay_limit', 400_000):]
 
 
 def load_state(path, rules=None):
@@ -318,7 +318,7 @@ def _train(args, root, rules):
         "simulations": args.simulations, "parallel": args.parallel or 64, "batch": args.batch, "seed": args.seed,
         'bootstrap_games': getattr(args, 'bootstrap_games', 16),
         'updates_per_cycle': getattr(args, 'updates_per_cycle', 32),
-        'replay_limit': getattr(args, 'replay_limit', 50_000),
+        'replay_limit': getattr(args, 'replay_limit', 400_000),
         'learning_rate': getattr(args, 'learning_rate', .001), 'workers': getattr(args, 'workers', None) or 6,
         "tactical_ms": args.tactical_ms, "snapshot_every": args.snapshot_every,
         "gate_seconds": args.seconds if args.seconds is not None else .25}
@@ -534,7 +534,7 @@ def _train(args, root, rules):
                     if game.done:
                         for sample in row["samples"]:
                             sample["result"] = float(game.winner * sample["player"])
-                        replay.extend(row["samples"])
+                        replay.extend(replay_symmetries(row['samples'], rules.height))
                         replay = replay[-settings["replay_limit"]:]
                         games += 1
                         since_update += 1

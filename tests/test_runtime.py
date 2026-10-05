@@ -152,6 +152,60 @@ class RuntimeTests(unittest.TestCase):
                     for budget in (0, 1, 2):
                         self.assertEqual(actual.threats(player, budget), expected.threats(player, budget))
 
+    def test_move_ties_use_model_prior_and_seeded_random_selection(self):
+        rules = Rules(9, 9, 5)
+        game = Game.from_moves([40], rules=rules)
+        for seed in range(4):
+            torch.manual_seed(seed)
+            net = Network(8, 1, 9).eval()
+            logits, _ = net.evaluate([game])
+            decision = selfplay_batch([game], net, 16, np.random.default_rng(42),
+                tactical_ms=0, workers=1, _mode=1, _duration=5)[0]
+            tied = np.flatnonzero(decision['policy'] == decision['policy'].max())
+            self.assertEqual(logits[0, decision['action']], logits[0, tied].max())
+
+        # Equal immediate wins must not always select the smallest cell index.
+        winning = Game(rules=rules)
+        winning.board[[2, 3, 4, 5]] = 1
+        def moves():
+            return [selfplay_batch([winning], None, 1, np.random.default_rng(seed),
+                bootstrap=True, tactical_ms=0, workers=1)[0]['action'] for seed in range(32)]
+        selected = moves()
+        self.assertEqual(set(selected), {1, 6})
+        self.assertEqual(moves(), selected)
+
+        # With uniform priors, exact visit ties still use the supplied random seed.
+        net = Network(8, 1, 9).eval()
+        with torch.no_grad():
+            for parameter in net.parameters():
+                parameter.zero_()
+        selected = [selfplay_batch([game], net, 8, np.random.default_rng(seed),
+            tactical_ms=0, workers=1, _mode=1, _duration=5)[0]['action'] for seed in range(32)]
+        self.assertGreater(len(set(selected)), 4)
+
+    def test_four_turn_tss_is_verified_and_obeys_limits(self):
+        fixture = json.loads((Path(__file__).parent/'fixtures/tss-fourturn.json').read_text())
+        rules = Rules(19, 19, 6, 2, 1)
+        game = Game.from_moves(fixture['moves'], rules=rules)
+        limits = {'deadline': time.perf_counter()+5, 'max_nodes': 1_000_000,
+                  'width': 32, 'max_candidates': 1000}
+        self.assertIsNone(search_tss(game, max_turns=3, **limits))
+        proof = search_tss(game, max_turns=4, **limits)
+        self.assertIsNotNone(proof)
+        self.assertTrue(verify_tss(game, proof, deadline=time.perf_counter()+5))
+        from engine.tss import search_tss as reference_tss, verify_tss as reference_verify
+        reference = Reference.from_moves(game.moves, rules=rules)
+        self.assertTrue(reference_verify(reference, proof, deadline=time.perf_counter()+5))
+        expected = reference_tss(reference, max_turns=4, deadline=time.perf_counter()+5,
+                                 max_nodes=1_000_000, width=32, max_candidates=1000)
+        self.assertIsNotNone(expected)
+        self.assertEqual(expected['max_turns'], 4)
+        self.assertTrue(verify_tss(game, expected, deadline=time.perf_counter()+5))
+        forged = json.loads(json.dumps(proof)); forged['tree']['responses'].pop()
+        self.assertFalse(verify_tss(game, forged, deadline=time.perf_counter()+5))
+        self.assertIsNone(search_tss(game, max_turns=4, deadline=time.perf_counter()+5, max_nodes=1))
+        self.assertIsNone(search_tss(game, max_turns=4, deadline=time.perf_counter()+5, stopped=lambda: True))
+
     def test_05_model_sizes_and_updated_native_weights_match(self):
         from engine.selfplay import observation, train_step
         for channels, blocks in ((32, 2), (64, 6), (128, 10)):

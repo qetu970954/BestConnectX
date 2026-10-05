@@ -11,6 +11,7 @@
 #include <random>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #ifdef _WIN32
@@ -28,6 +29,7 @@ struct Budget {
     Clock::time_point end;
     int remaining;
     Stop stopped;
+    std::mt19937_64* rng=nullptr;
     void tick() {
         if (remaining-- <= 0 || Clock::now() >= end || (stopped && stopped())) throw Limit{};
     }
@@ -172,6 +174,7 @@ struct Proof {
     std::vector<std::pair<Cells,std::shared_ptr<Proof>>> responses;
 };
 struct Certificate { int attacker=0, turns=0; std::shared_ptr<Proof> tree; };
+using ProofTable = std::map<std::string,std::shared_ptr<Proof>>;
 inline Position apply_turn(Position game, const Cells& moves, bool strict=false) {
     if (moves.empty() || moves.size()>static_cast<std::size_t>(game.left)) throw std::invalid_argument("Incomplete or overlong turn.");
     for (std::size_t i=0; i<moves.size(); ++i) {
@@ -180,7 +183,7 @@ inline Position apply_turn(Position game, const Cells& moves, bool strict=false)
     }
     return game;
 }
-std::shared_ptr<Proof> discover(const Position&, int attacker, int turns, int width, int candidates, Budget&);
+std::shared_ptr<Proof> discover(const Position&, int attacker, int turns, int width, int candidates, Budget&, ProofTable&);
 bool verify(const Position&, int attacker, int turns, const Proof&, Budget&);
 Cells fork(const Position&, Budget&, int width=24, int candidates=256);
 bool verifies(const Position&, const Cells&);

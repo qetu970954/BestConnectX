@@ -22,15 +22,15 @@ The implemented policy is:
 | Evaluation schedule | One evaluation second per four measured training seconds; GPU work alternates, unfinished gates can wait |
 | Retention | Keep every numbered milestone; stop at the disk cap instead of deleting old files |
 | Tuning | Keep defaults at batch 128 / concurrency 64 / six workers until a separate decision |
-| Replay capacity | Later user request sets new-run default to 50,000 positions; existing checkpoints retain their saved limit |
+| Replay capacity | New runs store all eight board views per completed position, with 400,000 entries retaining 50,000 originals; existing checkpoints keep their saved limit |
 
 Later user requests changed replay capacity and tournament candidate selection. With the default 1,000-game milestones, self-play at 10,450 games supplies `model-00010000.pt` for the next comparison against the accepted best. An active 2,000-game comparison finishes first; the next one skips 3,000–9,000. If the newest milestone has already been tested, wait for a newer one rather than testing the older backlog. All checkpoint files stay on disk; the live `latest.pt` does not change a tournament's models.
 
-The 50,000-position default is a user-selected setting, not a measured strength improvement. Historical profiling and trials below used 20,000 positions; those measurements have not been repeated at the larger capacity.
+The eight-view, 400,000-entry default is user-selected, not a measured strength improvement. Learning batch size is unchanged. Historical profiling and trials below used 20,000 original positions; those measurements have not been repeated with the larger stored buffer.
 
 The 55-point rule is a quick, provisional regression filter—not statistical proof of improvement. A rejected model can still generate training samples. Protecting best does not remove those samples or prove they are better data.
 
-The agent's measurement approval was separate: disposable copies only, at most **300 seconds of combined GPU-program duration**, including startup, loading, and warmup. No persistent training, long strength tournament, or modification of original run files was authorized. The user-run batch-256 trial was also a separate approval. Prior runs do not constrain the new design, but they must not be deleted or modified.
+The earlier measurement approval covered disposable copies and at most **300 seconds of combined GPU-program duration**, including startup, loading, and warmup. It did not authorize persistent training or long strength tournaments.
 
 ## What the research supports—and what it doesn't
 

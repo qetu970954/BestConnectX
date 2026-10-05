@@ -12,8 +12,16 @@ const char* last_error() { return error_message.c_str(); }
 void set_error(const char* message) { error_message=message; }
 EXPORT const char* runtime_error() { return last_error(); }
 
-static Cells shortest(const Edges& edges) {
-    return *std::min_element(edges.begin(),edges.end(),[](const Cells& a,const Cells& b){return a.size()!=b.size() ? a.size()<b.size() : a<b;});
+static Cells shortest(const Edges& edges, std::mt19937_64* rng=nullptr) {
+    auto best=std::min_element(edges.begin(),edges.end(),[](const Cells& a,const Cells& b){return a.size()<b.size();});
+    if (rng) {
+        int ties=0;
+        for (auto it=edges.begin(); it!=edges.end(); ++it)
+            if (it->size()==best->size() && std::uniform_int_distribution<int>(1,++ties)(*rng)==1) best=it;
+    }
+    auto moves=*best;
+    if (rng) std::shuffle(moves.begin(),moves.end(),*rng);
+    return moves;
 }
 bool verifies(const Position& game, const Cells& moves) {
     try {
@@ -56,7 +64,7 @@ static std::vector<Cells> verified_defenses(const Position& game, const Edges& t
     return {result.begin(),result.end()};
 }
 static std::vector<Cells> candidates(const Position& game, int width, int maximum, Budget& budget, bool short_fork=false) {
-    auto own=game.threats(game.player,game.left); if (!own.empty()) return {shortest(own)};
+    auto own=game.threats(game.player,game.left); if (!own.empty()) return {shortest(own,budget.rng)};
     int needed=std::min(game.left,static_cast<int>(game.empty().size()));
     std::set<int> pool; int windows=0;
     for (const auto& line : game.lines()) {
@@ -69,39 +77,45 @@ static std::vector<Cells> candidates(const Position& game, int width, int maximu
     if (short_fork && windows<=game.stones) return {};
     if (short_fork) for (const auto& edge : game.threats(-game.player,game.stones)) pool.insert(edge.begin(),edge.end());
     auto weights=game.scores(); Cells ranked(pool.begin(),pool.end());
-    std::stable_sort(ranked.begin(),ranked.end(),[&](int a,int b){return weights[a]!=weights[b] ? weights[a]>weights[b] : a<b;});
+    if (budget.rng) std::shuffle(ranked.begin(),ranked.end(),*budget.rng);
+    std::stable_sort(ranked.begin(),ranked.end(),[&](int a,int b){return weights[a]>weights[b];});
     if (ranked.size()>static_cast<std::size_t>(width)) ranked.resize(width);
     // ponytail: bounded attack shortlist can miss wins; widen after measured benefit. Defense checks remain complete.
     std::vector<Cells> result;
     for (std::size_t a=0; a<ranked.size(); ++a) {
         if (needed==1) { budget.tick(); result.push_back({ranked[a]}); }
-        else for (std::size_t b=a+1; b<ranked.size(); ++b) { budget.tick(); result.push_back({ranked[a],ranked[b]}); }
+        else for (std::size_t b=a+1; b<ranked.size(); ++b) { budget.tick(); result.push_back({std::min(ranked[a],ranked[b]),std::max(ranked[a],ranked[b])}); }
     }
+    if (budget.rng) std::shuffle(result.begin(),result.end(),*budget.rng);
     if (needed==2 || !short_fork) std::stable_sort(result.begin(),result.end(),[&](const Cells& a,const Cells& b){
         double x=0,y=0; for (int cell : a) x+=weights[cell]; for (int cell : b) y+=weights[cell];
-        return x!=y ? x>y : (!short_fork && a<b);
+        return x!=y ? x>y : (!budget.rng && !short_fork && a<b);
     });
     if (result.size()>static_cast<std::size_t>(maximum)) result.resize(maximum);
+    if (budget.rng && !short_fork) for (auto& turn : result) std::shuffle(turn.begin(),turn.end(),*budget.rng);
     return result;
 }
 Cells fork(const Position& game, Budget& budget, int width, int maximum) {
     if (game.done) return {};
-    auto own=game.threats(game.player,game.left); if (!own.empty()) return shortest(own);
+    auto own=game.threats(game.player,game.left); if (!own.empty()) return shortest(own,budget.rng);
     auto enemy=game.threats(-game.player,game.stones);
     for (const auto& moves : candidates(game,width,maximum,budget,true)) {
         budget.tick(); bool blocked=true;
         for (const auto& edge : enemy) {
             bool hit=false; for (int cell : moves) hit |= std::binary_search(edge.begin(),edge.end(),cell); blocked &= hit;
         }
-        if (blocked && verifies(game,moves)) return moves;
+        if (blocked && verifies(game,moves)) {
+            auto chosen=moves; if (budget.rng) std::shuffle(chosen.begin(),chosen.end(),*budget.rng);
+            return chosen;
+        }
     }
     return {};
 }
-std::shared_ptr<Proof> discover(const Position& game, int attacker, int turns, int width, int maximum, Budget& budget) {
-    budget.tick(); if (game.done || game.player!=attacker || turns<1) return {};
+static std::shared_ptr<Proof> explore(const Position& game, int attacker, int turns, int width, int maximum, Budget& budget, ProofTable& table) {
+    if (game.done || game.player!=attacker || turns<1) return {};
     auto own=game.threats(attacker,game.left);
     if (!own.empty()) {
-        auto moves=shortest(own); auto child=apply_turn(game,moves);
+        auto moves=shortest(own,budget.rng); auto child=apply_turn(game,moves);
         if (child.done && child.winner==attacker) return std::make_shared<Proof>(Proof{moves,{}});
     }
     if (turns<2) return {};
@@ -116,13 +130,23 @@ std::shared_ptr<Proof> discover(const Position& game, int attacker, int turns, i
         for (const auto& reply : replies) {
             budget.tick(); auto position=apply_turn(child,reply);
             if (position.done || position.player!=attacker) { complete=false; break; }
-            auto continuation=discover(position,attacker,turns-1,width,maximum,budget);
+            auto continuation=discover(position,attacker,turns-1,width,maximum,budget,table);
             if (!continuation) { complete=false; break; }
             proof->responses.emplace_back(reply,std::move(continuation));
         }
         if (complete) return proof;
     }
     return {};
+}
+std::shared_ptr<Proof> discover(const Position& game, int attacker, int turns, int width, int maximum, Budget& budget, ProofTable& table) {
+    budget.tick();
+    // Full board bytes avoid hash collisions. Rules, attacker and shortlist limits are fixed per root.
+    std::string key(game.board.begin(),game.board.end());
+    key.push_back(static_cast<char>(game.player)); key.push_back(static_cast<char>(game.left)); key.push_back(static_cast<char>(turns));
+    auto found=table.find(key); if (found!=table.end()) return found->second;
+    auto proof=explore(game,attacker,turns,width,maximum,budget,table);
+    table.emplace(std::move(key),proof);  // A timeout throws before insertion; empty means no proof in this search.
+    return proof;
 }
 bool verify(const Position& game, int attacker, int turns, const Proof& proof, Budget& budget) {
     budget.tick();
@@ -249,15 +273,16 @@ struct Tree {
         }
         node.visits.assign(node.actions.size(),0); node.total.assign(node.actions.size(),0); node.children.assign(node.actions.size(),-1);
     }
-    std::vector<float> policy() const {
+    std::vector<float> policy(bool priors=false) const {
         const auto& root=nodes[0]; std::vector<float> out(root.game.n*root.game.n,0);
-        int sum=std::accumulate(root.visits.begin(),root.visits.end(),0);
+        int sum=priors ? 0 : std::accumulate(root.visits.begin(),root.visits.end(),0);
         for (std::size_t i=0; i<root.actions.size(); ++i) out[root.actions[i]]=static_cast<float>(sum ? double(root.visits[i])/sum : root.prior[i]);
         return out;
     }
 };
 static void mcts(const std::vector<Position>& games, void* model, int simulations, std::mt19937_64* rng,
-                 Budget& budget, Workers& workers, std::vector<std::vector<float>>& output, double& inference, int& completed) {
+                 Budget& budget, Workers& workers, std::vector<std::vector<float>>& output, double& inference, int& completed,
+                 std::vector<std::vector<float>>* priors=nullptr) {
     if (!model) throw std::invalid_argument("Model required for PUCT search.");
     std::vector<Tree> trees; for (const auto& game : games) trees.emplace_back(game);
     int area=games[0].n*games[0].n;
@@ -285,7 +310,10 @@ static void mcts(const std::vector<Position>& games, void* model, int simulation
         if (!pending.empty()) evaluate(pending,leaves,false);
         ++completed;
     }
-    for (const auto& tree : trees) output.push_back(tree.policy());
+    for (const auto& tree : trees) {
+        output.push_back(tree.policy());
+        if (priors) priors->push_back(tree.policy(true));
+    }
 }
 static Budget make_budget(double duration, int nodes, Stop stopped) {
     if (std::isnan(duration) || nodes<1) throw std::invalid_argument("Invalid time/node budget.");
@@ -345,7 +373,8 @@ EXPORT int tactical(const std::int8_t* board,const int* meta,const int* moves,in
         auto budget=make_budget(duration,nodes,stopped); budget.tick(); Position game(board,meta,moves,count);
         if (operation==0) {
             if (turns<1 || turns>20 || width<2 || width>64 || candidates<1) throw std::invalid_argument("Invalid TSS limits.");
-            auto tree=discover(game,game.player,turns,width,candidates,budget); if (!tree) return 0;
+            ProofTable table;
+            auto tree=discover(game,game.player,turns,width,candidates,budget,table); if (!tree) return 0;
             budget.tick(); auto encoded=encode({game.player,turns,tree});
             if (encoded.size()>static_cast<std::size_t>(capacity)) throw std::runtime_error("Proof exceeds output limit.");
             std::copy(encoded.begin(),encoded.end(),output); return static_cast<int>(encoded.size());
@@ -379,17 +408,28 @@ EXPORT int runtime_search(const std::int8_t* boards,const int* metadata,const in
         timings[0]=std::max(0.,seconds(began)-inference); timings[1]=inference; return completed;
     } FAIL
 }
+static int choose(const float* policy,int area,std::mt19937_64& rng,double temperature,const float* prior=nullptr) {
+    if (area<4 || area>625 || !std::isfinite(temperature) || temperature<0) throw std::invalid_argument("Invalid sampling settings.");
+    std::vector<double> p(area); double sum=0;
+    for (int i=0; i<area; ++i) {
+        if (!std::isfinite(policy[i]) || policy[i]<0) throw std::invalid_argument("Invalid policy.");
+        p[i]=temperature==0 ? policy[i] : std::pow(policy[i],1/temperature); sum+=p[i];
+    }
+    if (sum<=0) throw std::invalid_argument("Empty policy.");
+    if (temperature==0) {
+        double best=-1, best_prior=-1; Cells ties;
+        for (int i=0; i<area; ++i) {
+            double weight=prior ? prior[i] : 0;
+            if (p[i]>best || (p[i]==best && weight>best_prior)) { best=p[i]; best_prior=weight; ties.clear(); }
+            if (p[i]==best && weight==best_prior) ties.push_back(i);
+        }
+        return ties[std::uniform_int_distribution<int>(0,static_cast<int>(ties.size())-1)(rng)];
+    }
+    return std::discrete_distribution<int>(p.begin(),p.end())(rng);
+}
 EXPORT int runtime_choose(const float* policy,int area,std::uint64_t seed,double temperature) {
     try {
-        if (area<4 || area>625 || !std::isfinite(temperature) || temperature<0) throw std::invalid_argument("Invalid sampling settings.");
-        std::vector<double> p(area); double sum=0;
-        for (int i=0; i<area; ++i) {
-            if (!std::isfinite(policy[i]) || policy[i]<0) throw std::invalid_argument("Invalid policy.");
-            p[i]=temperature==0 ? policy[i] : std::pow(policy[i],1/temperature); sum+=p[i];
-        }
-        if (sum<=0) throw std::invalid_argument("Empty policy.");
-        if (temperature==0) return static_cast<int>(std::max_element(p.begin(),p.end())-p.begin());
-        std::mt19937_64 rng(seed); return std::discrete_distribution<int>(p.begin(),p.end())(rng);
+        std::mt19937_64 rng(seed); return choose(policy,area,rng,temperature);
     } FAIL
 }
 
@@ -440,7 +480,7 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
             if (games.back().done || games.back().n!=n || games.back().k!=games[0].k || games.back().stones!=games[0].stones || games.back().starter!=games[0].starter) throw std::invalid_argument("Batch needs matching live games.");
         }
         std::vector<Strategy> strategies(count); std::vector<Cells> chosen_plans(count);
-        std::vector<std::vector<float>> results(count,std::vector<float>(area,0)); Cells unresolved;
+        std::vector<std::vector<float>> results(count,std::vector<float>(area,0)), priors(count); Cells unresolved;
         std::mt19937_64 rng(seed); Workers pool(std::min(workers,count));
         std::fill_n(sources,count,-1); std::fill_n(out_plans,2*count,-1);
         for (int i=0; i<count; ++i) {
@@ -452,7 +492,7 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
             }
             for (int j=0; j<2; ++j) if (plans[2*i+j]>=0) proof.push_back(plans[2*i+j]);
             if (!proof.empty() && !verifies(game,proof)) proof.clear();
-            auto own=game.threats(game.player,game.left); if (!own.empty()) proof=shortest(own);
+            auto own=game.threats(game.player,game.left); if (!own.empty() && proof.empty()) proof=shortest(own,&rng);
             double allowance=mode==0 ? tactical_ms/1000 : (tactical_ms>0 ? std::min(.05,std::max(.002,duration*.1)) : 0);
             if (proof.empty() && tss && strategies[i].proof.tree && allowance>0) {
                 auto budget=make_budget(allowance,20000,stopped);
@@ -465,13 +505,20 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
             if (proof.empty() && sources[i]<0 && allowance>0 && (mode==0 || duration>.02)) {
                 auto expires=Clock::now()+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(allowance));
                 if (tss) {
-                    Budget discovery{Clock::now()+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(allowance*(mode==0 ? .9 : .7))),mode==0 ? 10000 : 20000,stopped};
+                    Budget discovery{Clock::now()+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(allowance*(mode==0 ? .9 : .7))),mode==0 ? 10000 : 20000,stopped,&rng};
                     Certificate found;
-                    try {
-                        for (int horizon : (mode==0 ? Cells{2,3} : Cells{3})) {
-                            found={game.player,horizon,discover(game,game.player,horizon,24,1000,discovery)}; if (found.tree) break;
-                        }
-                    } catch (const Limit&) { found={}; }
+                    ProofTable table;
+                    for (int horizon : {2,3,4}) {
+                        if (discovery.remaining<=0 || Clock::now()>=discovery.end || (stopped && stopped())) break;
+                        auto pass=discovery;
+                        // Earlier horizons use at most half of what remains, reserving a deeper attempt.
+                        if (horizon<4) { auto now=Clock::now(); pass.end=now+(discovery.end-now)/2; pass.remaining=std::max(1,discovery.remaining/2); }
+                        int allocated=pass.remaining;
+                        try { found={game.player,horizon,discover(game,game.player,horizon,24,1000,pass,table)}; }
+                        catch (const Limit&) { found={}; }
+                        discovery.remaining-=allocated-std::max(0,pass.remaining);
+                        if (found.tree) break;
+                    }
                     if (found.tree) {
                         Budget checking{expires,mode==0 ? 10000 : 100000,stopped};
                         try {
@@ -480,7 +527,7 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
                         } catch (const Limit&) { /* Unknown: use normal search, never a value label. */ }
                     }
                 }
-                if (sources[i]<0) { Budget budget{expires,100000,stopped}; try { proof=fork(game,budget); } catch (const Limit&) {} }
+                if (sources[i]<0) { Budget budget{expires,100000,stopped,&rng}; try { proof=fork(game,budget); } catch (const Limit&) {} }
             }
             if (!proof.empty() && sources[i]<0) {
                 if (!verifies(game,proof)) throw std::runtime_error("Rejected an invalid native tactical certificate.");
@@ -497,16 +544,18 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
         double inference=0; int completed=0;
         if (!unresolved.empty()) {
             std::vector<Position> pending; for (int index : unresolved) pending.push_back(games[index]);
-            std::vector<std::vector<float>> output;
+            std::vector<std::vector<float>> output, root_priors;
             auto search_budget=make_budget(std::max(0.,duration-seconds(began)-(mode==1 ? .02 : 0)),100001,stopped);
-            mcts(pending,model,simulations,mode==0 ? &rng : nullptr,search_budget,pool,output,inference,completed);
-            for (std::size_t i=0; i<unresolved.size(); ++i) { results[unresolved[i]]=std::move(output[i]); sources[unresolved[i]]=0; }
+            mcts(pending,model,simulations,mode==0 ? &rng : nullptr,search_budget,pool,output,inference,completed,mode==1 ? &root_priors : nullptr);
+            for (std::size_t i=0; i<unresolved.size(); ++i) {
+                results[unresolved[i]]=std::move(output[i]); sources[unresolved[i]]=0;
+                if (mode==1) priors[unresolved[i]]=std::move(root_priors[i]);
+            }
         }
         overall.tick(); int used=0; out_offsets[0]=0;
         for (int i=0; i<count; ++i) {
             std::copy(results[i].begin(),results[i].end(),policies+i*area);
-            actions[i]=runtime_choose(results[i].data(),area,rng(),mode==1 ? 0 : (games[i].moves.size()<12 ? 1 : .25));
-            if (actions[i]<0) throw std::runtime_error(last_error());
+            actions[i]=choose(results[i].data(),area,rng,mode==1 ? 0 : (games[i].moves.size()<12 ? 1 : .25),priors[i].empty() ? nullptr : priors[i].data());
             for (std::size_t j=0; j<chosen_plans[i].size(); ++j) out_plans[2*i+j]=chosen_plans[i][j];
             auto encoded=write_strategy(strategies[i]);
             if (used+encoded.size()>static_cast<std::size_t>(capacity)) throw std::runtime_error("Strategy batch exceeds output limit.");

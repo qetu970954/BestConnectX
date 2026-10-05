@@ -35,7 +35,13 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 
 Ctrl+C also requests a safe stop. **Wait for Saved before closing the terminal.** The two-hour limit applies to the training loop; startup and final saving add time. An existing checkpoint in that directory is resumed, not replaced with a fresh model. For another experiment, change `--data`.
 
-The dashboard opens at **http://127.0.0.1:8765**. Pause training before bot play. Arrow keys move focus; Enter/Space places a stone. Use `--port 8766` for a second dashboard. No CUDA? Replace `--device cuda` with `--device cpu`; small CPU checks can also use `--workers 1`.
+The dashboard opens at **http://127.0.0.1:8765**. Choose English or 繁體中文; the browser remembers your choice. Its thinking-time menu offers **0.5, 1, 2, 4, 8, and 16 seconds per full turn**. Pause training before bot play. Arrow keys move focus; Enter/Space places a stone. Use `--port 8766` for a second dashboard. No CUDA? Replace `--device cuda` with `--device cpu`; small CPU checks can also use `--workers 1`.
+
+For the larger Connect6 setup with the same **256-sample learning batch**:
+
+```sh
+uv run python train.py --preset connect6 --board-size "15*15" --data data/connect6-15x15-b256-p128 --device cuda --batch 256 --parallel 128 --workers 6 --replay-limit 400000 --hours 2
+```
 
 ### If resume reports a changed unfinished gate
 
@@ -85,13 +91,13 @@ The starting values were checked on a Windows desktop with a multicore CPU and a
 | `--simulations 64` | Search simulations per placement; restored on resume |
 | `--channels 64 --blocks 6` | Model width and residual depth; a change needs a new run |
 | `--architecture attention` | Experimental model design; default `residual` |
-| `--replay-limit 50000` | Recent completed-game positions; new-run default 50,000, restored on resume |
+| `--replay-limit 400000` | Stored symmetry views; default 400,000 = 50,000 original positions; restored on resume |
 | `--max-games 1000` | Stop at **1,000 total games**, not 1,000 extra |
 | `--snapshot-every 1000` | Games between frozen milestones; restored on resume |
 | `--seconds 0.25` | Tournament time per full turn, not per stone |
 | `--disk-gib 20` | Disk cap; stops instead of deleting files |
 
-New runs retain up to **50,000 replay positions**, not games. Older positions are dropped when full. More history costs RAM and checkpoint time; it is not a proven strength gain. Existing checkpoints keep their saved limit—even if you pass another `--replay-limit`.
+Completed positions enter replay as **eight views each**, with their board and policy rotated/reflected together and the terminal result unchanged. The **400,000-entry** default retains 50,000 original positions; learning still samples the configured batch size. Older entries are dropped when full. Existing checkpoints keep their saved limit—even if you pass another `--replay-limit`.
 
 **`--parallel` and `--batch` do different jobs.** Changing batch size also changes how often old samples are reused. Passing `--batch 256` or a new learning rate on resume does not override the checkpoint. Use a fresh directory for those trials. See [learning rates](learning-rates.md).
 

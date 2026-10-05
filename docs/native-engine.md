@@ -47,9 +47,11 @@ Native inference uses **FP32** (32-bit floats). CUDA learning uses **BF16** thro
 | Channels / residual blocks | 4–256 / 0–32; default 64 / 6 |
 | Concurrent games / CPU workers | 1–128 / 1–12; default 64 / 6 |
 | Learning batch | 2–4096; default 128 |
-| Recent replay | 1–200,000 positions; new-run default 50,000; resume keeps its saved limit |
+| Recent replay | 1–400,000 entries; default 400,000 = eight views of 50,000 original positions; resume keeps its saved limit |
 
-The learner uses AdamW at a fixed default rate of **0.001**, with weight decay **0.0001**. Normally, eight completed games trigger 32 updates; larger completion batches scale the work upward. The default first 16 games use heuristic move selection. Learning samples recent completed games, rotates/reflects square boards, and minimizes policy cross-entropy plus value mean-square error. [Learning-rate controls](learning-rates.md) apply to new runs, not resume overrides.
+The learner uses AdamW at a fixed default rate of **0.001**, with weight decay **0.0001**. Normally, eight completed games trigger 32 updates; larger completion batches scale the work upward. The default first 16 games use heuristic move selection. At game completion, replay receives all eight square-board views of each position, transforming board and policy together. Learning samples the configured batch directly from those entries, without another augmentation step, and minimizes policy cross-entropy plus value mean-square error. [Learning-rate controls](learning-rates.md) apply to new runs, not resume overrides.
+
+For normal play, equal MCTS visits use the model prior, then seeded randomness for an exact tie. Equivalent tactical choices also avoid a fixed cell-index preference. TSS tries attacker horizons **2, 3, and 4** under one discovery time/node budget. Each earlier pass can use at most half of what remains, giving the deepest pass a chance even when a shallow pass times out. A per-root transposition table stores completed searches by full board, player, stones left, and remaining horizon; it never stores an interrupted search as a completed miss. The bounded attack shortlist can still miss wins. Every selected proof is independently verified within the remaining tactical allowance.
 
 ## Safety stays in place
 

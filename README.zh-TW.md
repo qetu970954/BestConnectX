@@ -16,7 +16,7 @@ uv run python -m engine.native
 uv run python dashboard.py --open-browser
 ```
 
-Dashboard 會開在 **http://127.0.0.1:8765**。還沒訓練時，bot 用的是沒有學習權重的規則式選點。瀏覽器用來下棋、看結果；訓練則在終端機執行。
+Dashboard 會開在 **http://127.0.0.1:8765**。語言選單可切換 **English／繁體中文**，瀏覽器會記住你的選擇。還沒訓練時，bot 用的是沒有學習權重的規則式選點。瀏覽器用來下棋、看結果；訓練則在終端機執行。
 
 Windows 需要 MSVC x64 C++ 建置工具。建置直接使用 PyTorch 附的程式庫，不必另外裝 CUDA SDK 或 CMake。已用 PyTorch 2.11.0+cu128 檢查 Windows CPU／CUDA。Unix 路徑需要 C++17 編譯器，目前還沒在這裡驗證。改過原生程式或 PyTorch 後，記得重新建置。
 
@@ -56,7 +56,7 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 ## 訓練時到底在做什麼？
 
 1. 最新模型自己跟自己下棋。C++ 先檢查戰術，再搭配神經網路做 MCTS 搜尋。
-2. 下完的棋局提供近期訓練樣本，也就是 **replay**。結果來自真的勝、和、負，不會把沒證完的戰術當成勝負。
+2. 每個已完成棋局的局面，都把**八種旋轉／反射視角**放入 replay。棋盤和策略一起變換，真實終局結果不變。新 run 預設 **400,000 筆**，可保留 50,000 個原始局面；每次學習仍抽原本的 batch 大小。
 3. Python 用這些樣本更新模型。CLI 顯示的 **optimizing** 就是在學習，不是在打比賽。
 4. 每完成 **1,000 盤**，保存一份不再更改的對弈模型。檔名數字算的是棋局，不是學習更新次數。
 5. 第一份里程碑先當初始 best。每次開始新比賽，都用**最新固定里程碑**挑戰目前 best，不再依序補比積壓的舊候選。已開始的比較先用原模型完成，全部里程碑檔案仍保留。
@@ -68,6 +68,8 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 訓練和評估輪流使用 GPU，時間分配目標大約是 **80% 訓練／20% 評估**。沒有待比賽的模型時，就把時間拿來訓練。
 
 想用圖理解搜尋？打開 [Bot 怎麼想](figures/how-bot-thinks.html)。**MCTS** 探索接下來的局面；**PUCT** 決定先探索哪條分支；**TSS** 尋找必勝戰術，但找到後還要獨立檢查。
+
+MCTS 的訪問次數相同時，先看模型的先驗機率；連先驗也相同、或戰術選擇等價時，就用帶 seed 的隨機選擇。TSS 會重用已搜尋完的相同局面，並在原本的時間／節點上限內依序嘗試 **2、3、4 個攻方回合**。超時只代表未知，接著照常選點。
 
 ## 模型檔案該用哪一個？
 
@@ -87,7 +89,7 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 
 ## 下棋、調設定、跑檢查
 
-要讓 dashboard 的 bot 下棋，先暫停訓練。可以選 best、latest 或編號里程碑，六子棋 bot 會完成整個回合。方向鍵移動焦點，Enter／Space 落子。Dashboard 用 Ctrl+C 關閉；要再開一個就加 `--port 8766`。請求限本機，並使用同源 token。
+要讓 dashboard 的 bot 下棋，先暫停訓練。可以選 best、latest 或編號里程碑，以及每完整回合 **0.5、1、2、4、8、16 秒**的思考時間。六子棋 bot 會完成整個回合。方向鍵移動焦點，Enter／Space 落子。Dashboard 用 Ctrl+C 關閉；要再開一個就加 `--port 8766`。請求限本機，並使用同源 token。
 
 起始設定是 **6 個 CPU 工作執行緒、64 盤同時進行、每次落子 64 次模擬、學習 batch 128**。這些是不同控制，不是同一種 batch。執行緒更多、GPU 更忙，不代表 bot 一定更強。預設學習率固定 **0.001**，沒有自動排程。
 

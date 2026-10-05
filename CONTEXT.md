@@ -66,7 +66,7 @@ The candidate's points per game: win 1, draw 0.5, loss 0. It differs from pure w
 _Avoid_: Win rate, Elo
 
 **Replay window**:
-The bounded recent samples used for learning, with board positions, policy targets, and real terminal results. Removing old samples from this window does not mean deleting existing files.
+The bounded recent samples used for learning, with board positions, policy targets, and real terminal results. Each completed original position contributes eight symmetry views; the replay limit counts these stored entries. Removing old samples from this window does not mean deleting existing files.
 _Avoid_: Permanent game archive
 
 **Self-play summary**:

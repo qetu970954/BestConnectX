@@ -14,7 +14,8 @@ import urllib.request
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from engine.game import Game, Rules
-from engine.storage import run_lock, save_json
+from engine.storage import GIB, load_json, run_lock, save_json
+from engine.training import next_gate, _code_sha256
 from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -54,7 +55,7 @@ def check(data, flags, connect6, browser):
                 time.sleep(.1)
         else:
             raise RuntimeError('Dashboard did not start.')
-        page = browser.new_page(viewport={'width': 1920, 'height': 1080}, device_scale_factor=1)
+        page = browser.new_page(viewport={'width': 1920, 'height': 1080}, device_scale_factor=1, locale='zh-TW')
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(url)
@@ -94,6 +95,21 @@ def check(data, flags, connect6, browser):
             board = page.locator('#board').bounding_box()
             assert abs(board['width'] - board['height']) < 1
         page.set_viewport_size({'width': 1920, 'height': 1080})
+        assert page.locator('#seconds option').evaluate_all('(options) => options.map(option => option.value)') == ['0.5', '1', '2', '4', '8', '16']
+        page.locator('#seconds').select_option('4')
+        page.locator('#language').select_option('en')
+        expect(page.locator('html')).to_have_attribute('lang', 'en')
+        expect(page.locator('#turn')).to_contain_text('Your turn')
+        expect(page.locator('#bot-move')).to_have_text('AI move')
+        expect(page.locator('#seconds')).to_have_value('4')
+        assert page.evaluate("!/[\\u3400-\\u9fff]/u.test(document.body.innerText.replace('繁體中文', ''))")
+        page.reload()
+        expect(page.locator('#language')).to_have_value('en')
+        expect(page.locator('#turn')).to_contain_text('Your turn')
+        page.locator('#language').select_option('zh-Hant')
+        expect(page.locator('html')).to_have_attribute('lang', 'zh-Hant')
+        expect(page.locator('#turn')).to_contain_text('你的回合')
+        expect(page.locator('#bot-move')).to_have_text('AI 落子')
         baseline = layout(page)
         assert page.evaluate("action('/api/move', {cell:-1})") is False
         expect(page.locator('#notice')).to_be_visible()
@@ -105,7 +121,7 @@ def check(data, flags, connect6, browser):
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.evaluate("notice('')")
         assert_layout(baseline, layout(page))
-        page.locator('#seconds').fill('.02')
+        page.locator('#seconds').select_option('0.5')
         page.locator('.selfplay-card .stats-details summary').focus()
         page.keyboard.press('Enter')
         expect(page.locator('.selfplay-card .stats-details')).to_have_attribute('open', '')
@@ -207,8 +223,13 @@ with tempfile.TemporaryDirectory() as name:
     if result.returncode:
         raise RuntimeError(result.stderr)
     # Normal training intentionally leaves evaluation pending when its 20% credit is exhausted.
+    report = 'gate-model-00000016.json'
+    if not (data / report).exists():
+        with run_lock(data):
+            run = load_json(data / 'run.json')
+            assert next_gate(data, Rules(**run['rule_config']), run['settings'], _code_sha256(), 20 * GIB) == report
     result = subprocess.run([sys.executable, '-m', 'engine', 'evaluate', '--data', str(data),
-        '--report', 'gate-model-00000016.json', '--device', 'cpu', '--hours', '.02'],
+        '--report', report, '--device', 'cpu', '--hours', '.02'],
         cwd=ROOT, capture_output=True, text=True, timeout=90)
     if result.returncode:
         raise RuntimeError(result.stderr)

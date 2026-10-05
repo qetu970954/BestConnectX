@@ -84,7 +84,8 @@ def search(games, network, simulations=64, rng=None, deadline=None, stopped=lamb
 
 def choose(policy, rng=None, temperature=1.0):
     if rng is None or temperature == 0:
-        return int(np.argmax(policy))
+        tied = np.flatnonzero(policy == policy.max())
+        return int((rng if rng is not None else np.random.default_rng(0)).choice(tied))
     p = policy.astype(np.float64) ** (1 / temperature)
     p /= p.sum()
     return int(rng.choice(len(p), p=p))

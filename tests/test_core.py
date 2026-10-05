@@ -5,10 +5,10 @@ from pathlib import Path
 import numpy as np
 import torch
 from engine.game import Game, Rules, covers, heuristic
-from engine.network import Network, augment
+from engine.network import Network
 from engine.search import Node, backup, search
 from engine.storage import atomic_bytes, run_lock, busy, save_checkpoint, load_checkpoint
-from engine.selfplay import train_step, observation, turn_action
+from engine.selfplay import train_step, observation, turn_action, replay_symmetries
 
 CONNECT6 = Rules(19, 19, 6, 2, 1)
 
@@ -109,10 +109,20 @@ class CoreTests(unittest.TestCase):
                           np.random.default_rng(0), torch.device('cpu'), rules=CONNECT6)
         self.assertTrue(np.isfinite(loss))
         self.assertFalse(torch.equal(before, net.policy.weight))
-        x = np.zeros((1, 8, 19, 19), dtype=np.float32); x[0, 0, 0, 0] = 1
-        for seed in range(16):
-            xx, pp = augment(x, p[None], np.random.default_rng(seed))
-            self.assertEqual(xx[0, 0].argmax(), pp.argmax())
+        g.board[0] = 1
+        sample = observation(g, p); sample.update(result=-1., source='mcts')
+        views = list(replay_symmetries([sample], g.size))
+        self.assertEqual(len(views), 8)
+        for index, view in enumerate(views):
+            for key in ('board', 'policy'):
+                expected = torch.rot90(sample[key].reshape(19, 19), index // 2)
+                if index % 2:
+                    expected = expected.flip(1)
+                torch.testing.assert_close(view[key], expected.flatten(), rtol=0, atol=0)
+            self.assertEqual((view['player'], view['left'], view['result'], view['source']),
+                             (sample['player'], sample['left'], -1., 'mcts'))
+        views[0]['board'][0] = 0
+        self.assertEqual(sample['board'][0], 1)  # Stored views own their tensor data.
 
     def test_storage_lock_and_cap(self):
         with tempfile.TemporaryDirectory() as name:

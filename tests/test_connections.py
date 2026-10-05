@@ -17,10 +17,10 @@ import torch
 from engine.game import Game, Rules, parse_board, heuristic
 from engine import training
 from engine.web import history
-from engine.network import Network, augment, device_for
+from engine.network import Network, device_for
 from engine.search import search
 from engine.storage import GIB, load_checkpoint, save_checkpoint, save_json
-from engine.selfplay import observation, selfplay_batch, train_step
+from engine.selfplay import observation, selfplay_batch, train_step, replay_symmetries
 from engine.tss import search_tss, verify_tss
 
 PROJECT = Path(__file__).resolve().parent.parent
@@ -105,20 +105,17 @@ class EngineTests(unittest.TestCase):
                    rules=rules)
         self.assertAlmostEqual(metric['loss'], metric['policy_loss'] + metric['value_loss'], places=5)
         self.assertFalse(torch.equal(before, net.policy.weight))
-        x, p = np.zeros((1, 8, 5, 5), dtype=np.float32), np.zeros((1, 25), dtype=np.float32)
-        x[0, 0, 0, 1], p[0, 1] = 1, 1
+        game.board.fill(0); game.board[1] = 1
+        p = np.zeros(25, dtype=np.float32); p[1] = 1
+        sample = observation(game, p); sample['result'] = 1.
         variants = set()
-        for rotation in range(4):
-            for reflection in range(2):
-                draws = iter((rotation, reflection))
-                rng = SimpleNamespace(integers=lambda *_: next(draws))
-                xx, pp = augment(x, p, rng)
-                self.assertEqual(xx.shape, x.shape)
-                self.assertEqual(xx[0, 0].argmax(), pp.argmax())
-                variants.add(xx.tobytes())
+        for view in replay_symmetries([sample], 5):
+            self.assertEqual(view['board'].shape, (25,))
+            self.assertEqual(view['board'].numpy().argmax(), view['policy'].numpy().argmax())
+            variants.add(view['board'].numpy().tobytes())
         self.assertEqual(len(variants), 8)
         with self.assertRaises(ValueError):
-            augment(np.zeros((1, 8, 5, 7)), np.zeros((1, 35)), np.random.default_rng(0))
+            list(replay_symmetries([sample], 7))
 
     def test_verified_gomoku_tss_selects_moves_without_adjudicating(self):
         game = Game.from_moves([39, 0, 40, 2, 41, 4])
@@ -190,6 +187,19 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(len(first['summaries']), 8)
             self.assertTrue(all('moves' not in row and 'board' not in row for row in first['summaries']))
             self.assertTrue(all('policy' in row and row['result'] in (-1., 0., 1.) for row in first['replay']))
+            # Completed positions enter replay as complete eight-view groups.
+            self.assertEqual(len(first['replay']) % 8, 0)
+            for offset in range(0, len(first['replay']), 8):
+                views = first['replay'][offset:offset+8]
+                base = views[0]
+                for index, view in enumerate(views):
+                    for key in ('board', 'policy'):
+                        expected = torch.rot90(base[key].reshape(9, 9), index // 2)
+                        if index % 2:
+                            expected = expected.flip(1)
+                        torch.testing.assert_close(view[key], expected.flatten(), rtol=0, atol=0)
+                    self.assertEqual((view['player'], view['left'], view['source'], view['result']),
+                                     (base['player'], base['left'], base['source'], base['result']))
             first['selfplay_counts'] = {'heuristic': 1234}  # Older checkpoint metadata must survive cleanup.
             save_checkpoint(root / 'latest.pt', first, 20 * GIB, root=root)
             result = cli(*command, '--simulations', '7', '--seed', '99', '--max-games', '12')

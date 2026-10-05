@@ -8,33 +8,39 @@
 <script src="/app.js" defer></script>
 </head>
 <body class="dashboard">
-<header><a class="brand" href="/">連棋 AI <span class="muted">/ 成果儀表板</span></a><span class="local"><i></i> 僅限本機</span></header>
+<header>
+<a class="brand" href="/"><span data-i18n="brand">連棋 AI</span> <span class="muted" data-i18n="dashboard">/ 成果儀表板</span></a>
+<div class="header-actions">
+<label class="language-picker"><span data-i18n="language">語言</span><select id="language" data-i18n-aria="languageLabel"><option value="en">English</option><option value="zh-Hant">繁體中文</option></select></label>
+<span class="local"><i></i><span data-i18n="localOnly">僅限本機</span></span>
+</div>
+</header>
 <main>
-<section class="intro"><div class="eyebrow" id="rule-title">可設定的連棋規則</div><h1>自我對弈，<span>持續改進。</span></h1><p id="rule-detail">AlphaZero 式策略／價值網路與威脅空間搜尋。訓練使用 CLI；此頁用於對戰和查看實測結果。</p></section>
+<section class="intro"><div class="eyebrow" id="rule-title" data-i18n="ruleTitleDefault">可設定的連棋規則</div><h1><span class="headline" data-i18n="introLead">自我對弈，</span><span data-i18n="introAccent">持續改進。</span></h1><p id="rule-detail" data-i18n="ruleDetailDefault">AlphaZero 式策略／價值網路與威脅空間搜尋。訓練使用 CLI；此頁用於對戰和查看實測結果。</p></section>
 <div class="workspace">
-<section class="board-panel" aria-label="連棋對戰">
-<div class="panel-heading"><div><span class="eyebrow">棋盤</span><h2 id="turn">黑棋先下</h2></div><span class="chip" id="placements">81 格</span></div>
-<div class="board-space"><div class="board-frame"><div id="board" role="group" aria-label="棋盤，方向鍵移動，Enter下棋"></div></div></div>
-<div class="board-footer"><span id="game-detail">連成五子或以上即可獲勝。</span><span id="move-count">0 手</span></div>
-<div class="play-controls"><label>執子顏色<select id="color"><option value="1">黑棋</option><option value="-1">白棋</option></select></label><label>對戰模型<select id="model"><option value="best">目前最佳</option><option value="heuristic">啟發式基準</option></select></label><label>思考秒數<input id="seconds" type="number" min="0.02" max="30" step="0.5" value="5"></label><button id="new-game" class="secondary">新對局</button><button id="bot-move" class="primary">AI 落子</button></div>
-<p class="caption">訓練期間使用 GPU 時，請先在 CLI 暫停訓練，再與 GPU AI 對戰。</p>
+<section class="board-panel" data-i18n-aria="boardRegion">
+<div class="panel-heading"><div><span class="eyebrow" data-i18n="board">棋盤</span><h2 id="turn" data-i18n="turnBlackFirst">黑棋先下</h2></div><span class="chip" id="placements" data-i18n="cellsDefault">81 格</span></div>
+<div class="board-space"><div class="board-frame"><div id="board" role="group" data-i18n-aria="boardAriaDefault"></div></div></div>
+<div class="board-footer"><span id="game-detail" data-i18n="gameDetailDefault">連成五子或以上即可獲勝。</span><span id="move-count">0 手</span></div>
+<div class="play-controls"><label><span data-i18n="color">執子顏色</span><select id="color"><option value="1" data-i18n="black">黑棋</option><option value="-1" data-i18n="white">白棋</option></select></label><label><span data-i18n="model">對戰模型</span><select id="model"><option value="best" data-i18n="best">目前最佳</option><option value="heuristic" data-i18n="heuristic">啟發式基準</option></select></label><label><span data-i18n="thinkingSeconds">思考秒數</span><select id="seconds"><option value="0.5">0.5</option><option value="1">1</option><option value="2" selected>2</option><option value="4">4</option><option value="8">8</option><option value="16">16</option></select></label><button id="new-game" class="secondary" data-i18n="newGame">新對局</button><button id="bot-move" class="primary" data-i18n="aiMove">AI 落子</button></div>
+<p class="caption" data-i18n="pauseTraining">訓練期間使用 GPU 時，請先在 CLI 暫停訓練，再與 GPU AI 對戰。</p>
 </section>
 <aside>
-<section class="card training-summary" tabindex="0" aria-label="訓練狀態與 CLI 指令"><div class="card-title"><span class="eyebrow">訓練狀態</span><span id="phase" class="status">尚未開始</span></div><div class="metrics"><div><strong id="games">0</strong><span>自我對弈棋局</span></div><div><strong id="updates">0</strong><span>最佳化更新</span></div><div><strong id="replay">0</strong><span>Replay 位置</span></div><div><strong id="storage">0 GiB</strong><span>保存產物</span></div></div><p id="train-command" class="command">uv run python train.py<br>再次執行以續訓。Ctrl+C 安全存檔。</p><p id="model-runtime" class="caption">C++ / LibTorch 原生引擎</p><details class="stats-details"><summary>執行時間</summary><p id="native-times" class="caption">尚無量測資料</p></details><p id="milestone" class="caption"></p><p id="message" class="caption">loss 是訓練診斷指標；模型升級依對戰結果判定。</p></section>
+<section class="card training-summary" tabindex="0" data-i18n-aria="trainingStatusAria"><div class="card-title"><span class="eyebrow" data-i18n="trainingStatus">訓練狀態</span><span id="phase" class="status" data-i18n="notStarted">尚未開始</span></div><div class="metrics"><div><strong id="games">0</strong><span data-i18n="selfplayGames">自我對弈棋局</span></div><div><strong id="updates">0</strong><span data-i18n="optimizationUpdates">最佳化更新</span></div><div><strong id="replay">0</strong><span data-i18n="replayPositions">Replay 位置</span></div><div><strong id="storage">0 GiB</strong><span data-i18n="artifacts">保存產物</span></div></div><p id="train-command" class="command" data-i18n="trainCommandDefault">uv run python train.py · 再次執行以續訓，Ctrl+C 安全存檔。</p><p id="model-runtime" class="caption" data-i18n="nativeEngine">C++ / LibTorch 原生引擎</p><details class="stats-details"><summary data-i18n="runtime">執行時間</summary><p id="native-times" class="caption" data-i18n="noTiming">尚無量測資料</p></details><p id="milestone" class="caption"></p><p id="message" class="caption" data-i18n="lossDiagnostic">loss 是訓練診斷指標；模型升級依對戰結果判定。</p></section>
 <section class="card selfplay-card" tabindex="0" aria-labelledby="selfplay-title">
-<div class="card-title"><span class="eyebrow" id="selfplay-title">最近 1,000 盤訓練自我對弈</span><span id="selfplay-window" class="status">0 / 1,000</span></div>
-<p id="selfplay-range" class="caption">尚無完整棋局摘要</p>
-<div class="metrics selfplay-metrics"><div><strong id="selfplay-length">—</strong><span>平均落子數</span></div><div><strong id="selfplay-turns">—</strong><span>平均回合數</span></div><div><strong id="black-rate">—</strong><span id="black-wins">黑棋勝 · 0 盤</span></div><div><strong id="white-rate">—</strong><span id="white-wins">白棋勝 · 0 盤</span></div><div><strong id="draw-rate">—</strong><span id="selfplay-draws">和棋 · 0 盤</span></div><div><strong id="selfplay-median">—</strong><span>落子數中位數</span></div></div>
-<details class="stats-details"><summary>長度範圍與落子來源</summary><p id="selfplay-length-range" class="caption">尚無長度資料</p><p id="selfplay-sources" class="caption">尚無落子來源資料</p></details>
-<p class="caption">每次存檔更新；不含評估對局。勝率以全部棋局為分母（含和棋），不代表棋力。</p>
+<div class="card-title"><span class="eyebrow" id="selfplay-title" data-i18n="recentSelfplay">最近 1,000 盤訓練自我對弈</span><span id="selfplay-window" class="status">0 / 1,000</span></div>
+<p id="selfplay-range" class="caption" data-i18n="noCompletedSummary">尚無完整棋局摘要</p>
+<div class="metrics selfplay-metrics"><div><strong id="selfplay-length">—</strong><span data-i18n="meanPlacements">平均落子數</span></div><div><strong id="selfplay-turns">—</strong><span data-i18n="meanTurns">平均回合數</span></div><div><strong id="black-rate">—</strong><span id="black-wins">黑棋勝 · 0 盤</span></div><div><strong id="white-rate">—</strong><span id="white-wins">白棋勝 · 0 盤</span></div><div><strong id="draw-rate">—</strong><span id="selfplay-draws">和棋 · 0 盤</span></div><div><strong id="selfplay-median">—</strong><span data-i18n="medianPlacements">落子數中位數</span></div></div>
+<details class="stats-details"><summary data-i18n="lengthAndSources">長度範圍與落子來源</summary><p id="selfplay-length-range" class="caption" data-i18n="noLength">尚無長度資料</p><p id="selfplay-sources" class="caption" data-i18n="noSources">尚無落子來源資料</p></details>
+<p class="caption" data-i18n="selfplayDisclaimer">每次存檔更新；不含評估對局。勝率以全部棋局為分母（含和棋），不代表棋力。</p>
 </section>
-<section class="card loss-card"><div class="eyebrow">訓練 Loss</div><p class="caption">L = 策略交叉熵 + 價值均方誤差</p><p class="caption"><span class="legend-total">總 loss</span> · <span class="legend-policy">策略</span> · <span class="legend-value">價值</span>（曲線抽樣，原始數據完整保存）</p><svg id="loss-chart" class="chart" viewBox="0 0 600 210" role="img" aria-label="訓練 loss 圖"></svg><p id="loss-value" class="caption">尚無訓練更新</p></section>
-<section class="card gate-card"><div class="eyebrow">候選模型對目前最佳 · 每版 100 場</div><p class="caption"><span class="legend-total">得分率：勝 1、和 0.5</span> · <span class="legend-policy">純勝率</span> · 虛線為 55% 暫定升級門檻</p><svg id="gate-chart" class="chart" viewBox="0 0 600 210" role="img" aria-label="候選版本配對對戰得分及勝率圖"></svg><div id="gate-results" class="subtle" tabindex="0" role="region" aria-label="模型評估結果">尚無里程碑評估。每完成 1,000 場訓練自我對弈，保存一個模型並進行 100 場顏色交換評估。</div></section>
-<section class="card incumbent-card"><div class="eyebrow">目前最佳</div><h3 id="incumbent">尚無已通過評估的模型</h3><p class="caption">候選總得分至少 55% 且通過計時檢查才可暫定升級，不代表已證實棋力。失敗版本和評估棋譜仍保留。</p></section>
+<section class="card loss-card"><div class="eyebrow" data-i18n="trainingLoss">訓練 Loss</div><p class="caption" data-i18n="lossFormula">L = 策略交叉熵 + 價值均方誤差</p><p class="caption"><span class="legend-total" data-i18n="totalLoss">總 loss</span> · <span class="legend-policy" data-i18n="policy">策略</span> · <span class="legend-value" data-i18n="value">價值</span> <span data-i18n="chartSampling">（曲線抽樣，原始數據完整保存）</span></p><svg id="loss-chart" class="chart" viewBox="0 0 600 210" role="img" data-i18n-aria="lossChartAria"></svg><p id="loss-value" class="caption" data-i18n="noTrainingUpdates">尚無訓練更新</p></section>
+<section class="card gate-card"><div class="eyebrow" data-i18n="gateTitle">候選模型對目前最佳 · 每版 100 場</div><p class="caption"><span class="legend-total" data-i18n="scoreLegend">得分率：勝 1、和 0.5</span> · <span class="legend-policy" data-i18n="winRate">純勝率</span> · <span data-i18n="thresholdLegend">虛線為 55% 暫定升級門檻</span></p><svg id="gate-chart" class="chart" viewBox="0 0 600 210" role="img" data-i18n-aria="gateChartAria"></svg><div id="gate-results" class="subtle" tabindex="0" role="region" data-i18n-aria="gateResultsAria" data-i18n="noGateResults">尚無里程碑評估。第一個里程碑是初始基準；之後以最新固定里程碑挑戰目前最佳。</div></section>
+<section class="card incumbent-card"><div class="eyebrow" data-i18n="currentBest">目前最佳</div><h3 id="incumbent" data-i18n="noAcceptedModel">尚無已通過評估的模型</h3><p class="caption" data-i18n="incumbentDisclaimer">候選總得分至少 55% 且通過計時檢查才可暫定升級，不代表已證實棋力。失敗版本和評估棋譜仍保留。</p></section>
 </aside>
 </div>
 <div id="notice" role="status" aria-live="polite" tabindex="0"></div>
-<footer><span>FREESTYLE CONNECTION GAMES · 自行訓練權重</span><span>棋力依本機配對評估呈現，不宣稱外部排名</span></footer>
+<footer><span data-i18n="footerTraining">FREESTYLE CONNECTION GAMES · 自行訓練權重</span><span data-i18n="footerRanking">棋力依本機配對評估呈現，不宣稱外部排名</span></footer>
 </main>
 </body>
 </html>

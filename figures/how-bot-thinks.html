@@ -309,7 +309,7 @@ footer { margin-top:56px; border-top:1px solid var(--rule); padding-top:20px; co
 </g>
 <g>
 <rect class="node" x="400" y="296" width="320" height="96" rx="6"/><rect class="chip" x="412" y="308" width="56" height="16" rx="2"/><text class="tag" x="424" y="319">REPLAY</text>
-<text class="name" x="560" y="344">Recent learning examples</text><text class="tech" x="560" y="372">(position, policy π, result z)</text>
+<text class="name" x="560" y="344">Store all eight board views</text><text class="tech" x="560" y="372">400,000 entries · same learning batch</text>
 </g>
 <g>
 <rect class="mask" x="400" y="432" width="320" height="80" rx="6"/><rect class="node focal" x="400" y="432" width="320" height="80" rx="6"/><rect class="chip" x="412" y="444" width="64" height="16" rx="2"/><text class="tag" x="424" y="455">PYTORCH</text>
@@ -337,7 +337,7 @@ footer { margin-top:56px; border-top:1px solid var(--rule); padding-top:20px; co
 <text class="small" x="40" y="692">Solid arrow = learning path</text><text class="small" x="400" y="692">Dashed arrow = repeat / milestone</text><text class="small" x="840" y="692">Evaluation games never enter replay</text>
 </svg>
 </div>
-<figcaption>Rotate or reflect the board and its policy together during learning. Keep weights fixed during each search batch. The first frozen model is a baseline, not proven strength; later promotion requires a passing score and timing check.</figcaption>
+<figcaption>When a game ends, store all eight rotated/reflected views of each board and its policy, keeping the real terminal result unchanged. Sample the usual batch from these entries. Keep weights fixed during each search batch. The first frozen model is a baseline, not proven strength; later promotion requires a passing score and timing check.</figcaption>
 </figure>
 <div class="ideas">
 <div class="idea"><h3>The experiment worth running</h3><p>Train residual, pooled, and attention models in separate runs. Compare them under the same rules and thinking time. Measure strength per training hour, not GPU usage.</p></div>

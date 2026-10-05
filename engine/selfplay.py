@@ -5,7 +5,6 @@ from functools import lru_cache
 import numpy as np
 import torch
 from .game import DEFAULT_RULES, Game, heuristic
-from .network import augment
 from .search import search, choose
 from .tactics import forcing_win, verifies
 from .tss import search_tss, verify_tss
@@ -53,14 +52,9 @@ def selfplay_batch(boards, net, simulations, rng, *, bootstrap=False, tactical_m
             is_stopped = lambda until: lambda: stopped() or time.perf_counter() >= until
             proof_tree = None
             if tss_enabled:
-                for horizon in (2, 3):
-                    if time.perf_counter() >= search_expires:
-                        break
-                    proof_tree = search_tss(game, max_turns=horizon, deadline=search_expires,
-                                            max_nodes=10_000, max_candidates=1_000,
-                                            stopped=is_stopped(search_expires))
-                    if proof_tree is not None:
-                        break
+                proof_tree = search_tss(game, max_turns=4, deadline=search_expires,
+                                        max_nodes=10_000, max_candidates=1_000,
+                                        stopped=is_stopped(search_expires))
             if proof_tree is not None:
                 checked = verify_tss(game, proof_tree, deadline=expires,
                                      max_nodes=10_000, stopped=is_stopped(expires))
@@ -111,6 +105,18 @@ def selfplay_samples(game, decision):
     return [sample]
 
 
+def replay_symmetries(samples, size):
+    """Store all eight square-board views after the real terminal result is known."""
+    for sample in samples:
+        for rotation in range(4):
+            board = np.rot90(sample['board'].numpy().reshape(size, size), rotation)
+            policy = np.rot90(sample['policy'].numpy().reshape(size, size), rotation)
+            for reflect in (False, True):
+                yield {**sample,
+                    'board': torch.from_numpy((board[:, ::-1] if reflect else board).copy().reshape(-1)),
+                    'policy': torch.from_numpy((policy[:, ::-1] if reflect else policy).copy().reshape(-1))}
+
+
 @lru_cache(maxsize=20_000)
 def _replay_features(board, dtype, player, left, rules):
     # Bound cached features separately from the replay buffer; never serialize this cache.
@@ -130,7 +136,6 @@ def train_step(net, optimizer, replay, batch_size, rng, device, *, rules=DEFAULT
                                         row["player"], row["left"], rules))
     x = np.stack(features).astype(np.float32)
     p = np.stack([row["policy"].numpy().astype(np.float32) for row in batch])
-    x, p = augment(x, p, rng)
     inputs = torch.from_numpy(x).to(device)
     target = torch.from_numpy(p).to(device)
     z = torch.tensor([row["result"] for row in batch], device=device)
@@ -255,7 +260,7 @@ def turn_action(game, net, seconds, simulations, stopped, *, tactics=False, tss=
         budget = min(.05, seconds * .1)
         tactical_deadline = started + budget
         if tss:
-            proof = search_tss(game, max_turns=3, deadline=highres_started + budget * .7,
+            proof = search_tss(game, max_turns=4, deadline=highres_started + budget * .7,
                                max_nodes=20_000, max_candidates=1_000, stopped=stopped)
             if proof is not None:
                 checked = verify_tss(game, proof, deadline=highres_started + budget,
