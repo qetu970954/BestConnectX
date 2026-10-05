@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 from threading import RLock
+import time
 
 GIB = 1024 ** 3
 _ACCOUNTING = {}  # Only active, exclusively locked runs; never persisted across sessions.
@@ -68,7 +69,15 @@ def atomic_bytes(path, payload, cap=None, *, root=None):
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temp, path)
+            # Windows readers/scanners can briefly prevent an otherwise atomic replacement.
+            for attempt in range(5):
+                try:
+                    os.replace(temp, path)
+                    break
+                except PermissionError as exc:
+                    if getattr(exc, 'winerror', None) not in (5, 32, 33) or attempt == 4:
+                        raise
+                    time.sleep(.05 * 2 ** attempt)
             _adjust_usage(path, len(payload) - old_size)
         finally:
             try:

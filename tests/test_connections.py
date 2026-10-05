@@ -456,6 +456,50 @@ class EngineTests(unittest.TestCase):
                 self.assertAlmostEqual(third['max_turn_overrun_seconds'], .12)
             self.assertEqual(budgets, [.125, 0., .125])
 
+    def test_milestones_wait_for_evaluation_credit_before_freezing_candidate(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
+                simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=8,
+                seconds=.25, hours=.01, max_games=24, channels=4, blocks=1, workers=1)
+            with patch.object(training, 'eval_allowance', return_value=0.), \
+                    patch.object(training, 'next_gate', wraps=training.next_gate) as gates, patch('builtins.print'):
+                training.train(args)
+            gates.assert_not_called()  # Exporting a milestone must not reserve an outdated candidate.
+            saved = training.load_state(root / 'latest.pt')
+            self.assertEqual(saved['games'], 24)
+            self.assertIsNone(saved['gate'])
+            self.assertFalse(list(root.glob('gate-model-*.json')))
+            gate = training.next_gate(root, args.rules, saved['settings'], training._code_sha256(), 20 * GIB)
+            self.assertEqual(gate, 'gate-model-00000024.json')
+
+    def test_new_gate_uses_latest_milestone_without_backlog(self):
+        with tempfile.TemporaryDirectory() as name:
+            root, rules = Path(name), Rules(4, 4, 4)
+            net = Network(channels=4, blocks=1, size=4)
+            for games in (1000, 2000, 3000, 10000):
+                save_checkpoint(root / f'models/model-{games:08d}.pt',
+                                training.snapshot(net, games // 8, rules, games), 20 * GIB, root=root)
+            opponent = {'file': 'models/model-00001000.pt', 'games': 1000, 'kind': 'network',
+                        'rules': rules.id, 'sha256': training.digest(root / 'models/model-00001000.pt')}
+            save_json(root / 'incumbent.json', opponent)
+            frozen = {path.name: path.read_bytes() for path in (root / 'models').glob('*.pt')}
+            settings = {'gate_seconds': .25, 'simulations': 64}
+            name = training.next_gate(root, rules, settings, training._code_sha256(), 20 * GIB)
+            self.assertEqual(name, 'gate-model-00010000.json')
+            report = json.loads((root / name).read_text())
+            self.assertEqual((report['candidate']['games'], report['candidate']['step']), (10000, 1250))
+            self.assertEqual(report['opponent'], opponent)
+            original_report = (root / name).read_bytes()
+            self.assertEqual(training.next_gate(root, rules, settings, training._code_sha256(), 20 * GIB), name)
+            self.assertEqual((root / name).read_bytes(), original_report)  # Resume, do not recreate the comparison.
+            report.update(decision_recorded=True, promoted=False)
+            save_json(root / name, report)
+            self.assertIsNone(training.next_gate(root, rules, settings, training._code_sha256(), 20 * GIB))
+            self.assertFalse((root / 'gate-model-00002000.json').exists())
+            self.assertFalse((root / 'gate-model-00003000.json').exists())
+            self.assertEqual({path.name: path.read_bytes() for path in (root / 'models').glob('*.pt')}, frozen)
+
     def test_slow_gate_loading_does_not_starve_scheduled_evaluation(self):
         device_for('cpu')
         with tempfile.TemporaryDirectory() as name:
@@ -559,12 +603,13 @@ class EngineTests(unittest.TestCase):
                 smaller = training.load_state(root / 'latest.pt')
                 self.assertEqual(smaller['games'], 32)
                 self.assertEqual(smaller['settings']['parallel'], 2)
-            # Saved snapshots form the queue. After a tie, the next one still challenges the old best.
+                self.assertEqual(smaller['gate'], state['gate'])  # New milestones must not replace an active gate.
+            # After this gate finishes, skip the backlog and challenge best with the newest milestone.
             report.update(decision_recorded=True, promoted=False)
             save_json(root / state['gate'], report)
             next_name = training.next_gate(root, args.rules, state['settings'], training._code_sha256(), 20 * GIB)
             next_report = json.loads((root / next_name).read_text())
-            self.assertEqual(next_report['candidate']['games'], 24)
+            self.assertEqual(next_report['candidate']['games'], 32)
             self.assertEqual(next_report['opponent']['games'], 8)
             self.assertEqual(next_report['simulations'], 2)
 

@@ -189,25 +189,26 @@ def _gate_report(rules, candidate, opponent, settings, code_sha):
 
 
 def next_gate(root, rules, settings, code_sha, cap):
-    """The immutable model directory is the queue; freeze the opponent when a gate starts."""
+    """Compare the newest frozen milestone with best; never drain an old backlog."""
     opponent = load_json(root / "incumbent.json", {})
     if opponent.get("kind") != "network":
         return None
-    for path in sorted((root / "models").glob("model-*.pt")):
-        games = int(path.stem.rsplit("-", 1)[-1])
-        if games <= opponent["games"]:
-            continue
-        name = f"gate-{path.stem}.json"
-        report = load_json(root / name)
-        if report is None:
-            state = load_state(path, rules)
-            candidate = {"id": path.stem, "file": f"models/{path.name}", "sha256": digest(path),
-                         "games": games, "step": state["step"]}
-            save_json(root / name, _gate_report(rules, candidate, opponent, settings, code_sha), root=root, cap=cap)
-            return name
-        if not report.get("decision_recorded"):
-            return name
-    return None
+    path = max((root / "models").glob("model-*.pt"), default=None,
+               key=lambda p: int(p.stem.rsplit("-", 1)[-1]))
+    if path is None:
+        return None
+    games = int(path.stem.rsplit("-", 1)[-1])
+    if games <= opponent["games"]:
+        return None
+    name = f"gate-{path.stem}.json"
+    report = load_json(root / name)
+    if report is None:
+        state = load_state(path, rules)
+        candidate = {"id": path.stem, "file": f"models/{path.name}", "sha256": digest(path),
+                     "games": games, "step": state["step"]}
+        save_json(root / name, _gate_report(rules, candidate, opponent, settings, code_sha), root=root, cap=cap)
+        return name
+    return name if not report.get("decision_recorded") else None
 
 
 def restart_gate(root, name, rules, settings, code_sha, cap):
@@ -431,7 +432,7 @@ def _train(args, root, rules):
         print(progress + (f" | {message}" if message else ""), flush=True)
 
     def milestone():
-        nonlocal last_milestone, gate
+        nonlocal last_milestone
         filename = f"models/model-{games:08d}.pt"
         path = artifact(root, filename)
         if not path.exists():
@@ -448,8 +449,6 @@ def _train(args, root, rules):
             save_json(root / "incumbent.json", {**candidate, "kind": "network", "rules": rules.id,
                 "initial_baseline": True, "label": "Initial milestone baseline; strength not validated"}, root=root, cap=cap)
             _export_best(root, candidate, cap)
-        if gate is None:
-            gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
         last_milestone = games
         checkpoint()
 
@@ -458,7 +457,7 @@ def _train(args, root, rules):
         while not stopped():
             began, phase = time.monotonic(), "training"
             credit = eval_allowance(phase_seconds)
-            if gate is None and credit >= 1:
+            if gate is None and credit >= max(1., settings["gate_seconds"] + .05):
                 gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
             if gate and credit >= max(1., load_json(root / gate)["seconds_per_turn"] + .05):
                 phase = "evaluation"

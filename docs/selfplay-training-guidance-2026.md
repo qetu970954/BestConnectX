@@ -14,6 +14,7 @@ The implemented policy is:
 | Self-play actor | Newest learner; a failed promotion does not roll it back |
 | Recovery | Full `latest.pt` about every 60 seconds at safe boundaries, plus startup, milestones, and normal stop |
 | Milestones | Frozen model-only exports every 1,000 completed games; numbers count games, not updates |
+| Tournament candidate | Newest frozen milestone when a comparison starts; skip older waiting candidates and finish active comparisons without switching models |
 | Best | `incumbent.json` selects the accepted milestone; `best.pt` mirrors it atomically |
 | First milestone | Initial baseline, not a strength-validated model |
 | Promotion | 100 games / 50 shared-opening color-swapped pairs; at least 55 points; all histories verified; maximum turn overtime 0.1 seconds |
@@ -23,7 +24,9 @@ The implemented policy is:
 | Tuning | Keep defaults at batch 128 / concurrency 64 / six workers until a separate decision |
 | Replay capacity | Later user request sets new-run default to 50,000 positions; existing checkpoints retain their saved limit |
 
-The later 50,000-position default is a user-selected setting, not a measured strength improvement. Historical profiling and trials below used 20,000 positions; those measurements have not been repeated at the larger capacity.
+Later user requests changed replay capacity and tournament candidate selection. With the default 1,000-game milestones, self-play at 10,450 games supplies `model-00010000.pt` for the next comparison against the accepted best. An active 2,000-game comparison finishes first; the next one skips 3,000–9,000. If the newest milestone has already been tested, wait for a newer one rather than testing the older backlog. All checkpoint files stay on disk; the live `latest.pt` does not change a tournament's models.
+
+The 50,000-position default is a user-selected setting, not a measured strength improvement. Historical profiling and trials below used 20,000 positions; those measurements have not been repeated at the larger capacity.
 
 The 55-point rule is a quick, provisional regression filter—not statistical proof of improvement. A rejected model can still generate training samples. Protecting best does not remove those samples or prove they are better data.
 

@@ -59,7 +59,7 @@ If resume reports that an unfinished tournament's code changed, see [`--restart-
 2. Completed games supply recent training samples, called **replay**. Results come from actual wins, draws, and losses—not unfinished tactical proofs.
 3. Python updates the model using those samples. The CLI calls this phase **optimizing**. It is learning, not a tournament.
 4. Every **1,000 completed games**, the trainer saves a frozen playing model. The filename counts games, not learning updates.
-5. The first milestone becomes the initial best. Later milestones challenge the accepted best in an automatic tournament.
+5. The first milestone becomes the initial best. Each new tournament uses the **newest frozen milestone** against the accepted best, skipping older waiting candidates. An active comparison finishes with its original models; all milestone files are kept.
 
 A tournament uses **100 games**, with 50 shared openings and swapped colors. A candidate needs **at least 55 points**, verified game histories, and at most **0.1 seconds** of full-turn overtime. A win earns 1 point and a draw 0.5. Default thinking time is **0.25 seconds per full turn**, including both Connect6 placements, with the same simulation cap for both bots (default 64).
 
