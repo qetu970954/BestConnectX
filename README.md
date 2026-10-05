@@ -58,7 +58,7 @@ If resume reports that an unfinished tournament's code changed, see [`--restart-
 1. The newest model plays games against itself. C++ combines tactical checks with neural MCTS search.
 2. Each completed position supplies **all eight rotated/reflected views** to replay. Board and policy move together; the real terminal result stays the same. The new-run limit of **400,000 entries** holds 50,000 original positions. Learning still samples the usual batch size.
 3. Python updates the model using those samples. The CLI calls this phase **optimizing**. It is learning, not a tournament.
-4. Every **1,000 completed games**, the trainer saves a frozen playing model. The filename counts games, not learning updates.
+4. By default, every **10,000 completed games**, the trainer saves a frozen playing model. Existing runs keep their saved interval. The filename counts games, not learning updates.
 5. The first milestone becomes the initial best. Each new tournament uses the **newest frozen milestone** against the accepted best, skipping older waiting candidates. An active comparison finishes with its original models; all milestone files are kept.
 
 A tournament uses **100 games**, with 50 shared openings and swapped colors. A candidate needs **at least 55 points**, verified game histories, and at most **0.1 seconds** of full-turn overtime. A win earns 1 point and a draw 0.5. Default thinking time is **0.25 seconds per full turn**, including both Connect6 placements, with the same simulation cap for both bots (default 64).
@@ -77,13 +77,13 @@ Tied MCTS visit counts use the model's prior; exact prior ties and equivalent ta
 | --- | --- |
 | `latest.pt` | Continue training: weights, optimizer, recent samples, unfinished games, pending work, and random state |
 | `best.pt` | Play with the accepted model; the first baseline is not strength-validated |
-| `models/model-00001000.pt`, etc. | Play with a frozen milestone; these cannot restore the full learner |
+| `models/model-00010000.pt`, etc. | Play with a frozen milestone; these cannot restore the full learner |
 | `incumbent.json` | The authoritative record of which milestone is best |
 | `run.json`, `status.json` | Saved configuration and current progress |
 | `selfplay-stats.json`, `metrics/` | Recent game summaries and loss history |
 | `gate-model-*.json`, `gate-archive/` | Resumable tournament histories and archived comparisons |
 
-`latest.pt` saves **once per model milestone** (normally every 1,000 completed games) and on a safe stop. Starting or resuming does not rewrite it, and there are no timed saves between milestones. Live progress still updates; game summaries and loss history are published with the checkpoint. A power failure or forced kill loses work since the last complete save.
+`latest.pt` saves **once per model milestone** (new-run default: every 10,000 completed games) and on a safe stop. Starting or resuming does not rewrite it, and there are no timed saves between milestones. Live progress still updates; game summaries and loss history are published with the checkpoint. A power failure or forced kill loses work since the last complete save.
 
 Saves use atomic replacement. The default disk cap is **20 GiB**: if it fills, training stops rather than silently deleting old models. Finished self-play move histories are not archived; recent samples and unfinished games stay in the checkpoint. Tournament histories are retained for verification. If a `best.pt` export is interrupted, resume repairs it from `incumbent.json`.
 

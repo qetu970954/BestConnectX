@@ -67,7 +67,7 @@ def main(argv=None):
                           help="Concurrent self-play games (new-run default: 64); explicit values also apply on resume")
     training.add_argument("--batch", type=int, default=128)
     training.add_argument("--tactical-ms", type=float, default=2)
-    training.add_argument("--snapshot-every", type=int, default=1000, help="Self-play games between immutable model snapshots")
+    training.add_argument("--snapshot-every", type=int, default=10000, help="Self-play games between immutable model snapshots (new-run default: 10000; restored on resume)")
     training.add_argument("--seconds", type=float, default=None,
                           help="Equal gate full-turn limit (new-run default: 0.25s); frozen in each gate")
     training.add_argument("--restart-gate", action="store_true",

@@ -13,7 +13,7 @@ The implemented policy is:
 | Main goal | Playing strength comes before CPU/GPU utilization |
 | Self-play actor | Newest learner; a failed promotion does not roll it back |
 | Recovery | Full `latest.pt` once per model milestone and on safe stop; no startup/resume rewrite or timed saves |
-| Milestones | Frozen model-only exports every 1,000 completed games; numbers count games, not updates |
+| Milestones | New-run default: frozen model-only exports every 10,000 completed games; saved runs retain their interval; numbers count games, not updates |
 | Tournament candidate | Newest frozen milestone when a comparison starts; skip older waiting candidates and finish active comparisons without switching models |
 | Best | `incumbent.json` selects the accepted milestone; `best.pt` mirrors it atomically |
 | First milestone | Initial baseline, not a strength-validated model |
@@ -30,7 +30,9 @@ Automatic, separate phases simplify the training loop. Each tournament runs to c
 
 The eight-view, 400,000-entry default is user-selected, not a measured strength improvement. Learning batch size is unchanged. Historical profiling and trials below used 20,000 original positions; those measurements have not been repeated with the larger stored buffer.
 
-Milestone-only saves replaced periodic saves to reduce checkpointing and export overhead. Full recovery now saves once at 1,000, 2,000, 3,000 games, etc., plus safe stop. The checkpoint precedes model publication, and resume repairs an interrupted milestone export without retraining. Live status still updates; summaries and loss history publish with checkpoints. Forced shutdown can lose work since the previous milestone. The historical speed comparison below does not measure this newer cadence.
+Milestone-only saves replaced periodic saves to reduce checkpointing and export overhead. At that time, full recovery saved once at 1,000, 2,000, 3,000 games, etc., plus safe stop. The checkpoint precedes model publication, and resume repairs an interrupted milestone export without retraining. Live status still updates; summaries and loss history publish with checkpoints. Forced shutdown can lose work since the previous milestone. The historical speed comparison below does not measure this newer cadence.
+
+The default milestone interval is now 10,000 games. New standard runs save at 10,000, 20,000, 30,000 games, etc. Automatic tournaments follow those milestones after the initial baseline; safe-stop saves remain enabled. Existing runs restore their saved interval, and the short tic-tac-toe preset keeps its explicit 16-game interval.
 
 The 55-point rule is a quick, provisional regression filter—not statistical proof of improvement. A rejected model can still generate training samples. Protecting best does not remove those samples or prove they are better data.
 

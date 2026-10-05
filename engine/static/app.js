@@ -283,7 +283,7 @@ function render() {
   $('storage').textContent = `${(Number(state.artifact_bytes || 0) / 2**30).toFixed(2)} GiB`;
   $('incumbent').textContent = incumbentLabel(state.incumbent);
   $('message').textContent = localizeStatus(state.message);
-  $('milestone').textContent = t('milestoneStatus', {next: state.next_milestone || 1000,
+  $('milestone').textContent = t('milestoneStatus', {next: state.next_milestone || 10000,
     minutes: Math.ceil((state.remaining_seconds || 0) / 60), share: (100 * Number(state.evaluation_share || 0)).toFixed(1), parallel: state.parallel || 64});
   const selfplay = history.selfplay || {window: 1000, games: 0, source_counts: {}};
   $('selfplay-window').textContent = `${formatNumber(selfplay.games)} / ${formatNumber(selfplay.window)}`;
