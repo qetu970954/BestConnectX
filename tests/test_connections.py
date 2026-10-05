@@ -506,26 +506,35 @@ class EngineTests(unittest.TestCase):
                 self.assertAlmostEqual(third['max_turn_overrun_seconds'], .12)
             self.assertEqual(budgets, [.125, 0., .125])
 
-    def test_milestones_wait_for_evaluation_credit_before_freezing_candidate(self):
+    def test_full_tournaments_finish_before_the_next_training_milestone(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
                 simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=8,
                 seconds=.25, hours=.01, max_games=24, channels=4, blocks=1, workers=1)
-            with patch.object(training, 'eval_allowance', return_value=0.), \
-                    patch.object(training, 'next_gate', wraps=training.next_gate) as gates, \
+            completed, original = [], training.run_gate
+            def full_gate(*a, **kw):
+                before = (root / 'latest.pt').read_bytes()
+                rng = torch.get_rng_state()
+                report = original(*a, **kw)
+                self.assertTrue(report['decision_recorded'])
+                self.assertEqual(len(report['matches']), 100)
+                self.assertEqual((root / 'latest.pt').read_bytes(), before)
+                torch.testing.assert_close(torch.get_rng_state(), rng, rtol=0, atol=0)
+                completed.append(report['candidate']['games'])
+                return report
+            with patch.object(training, 'run_gate', side_effect=full_gate), \
                     patch.object(training, 'save_checkpoint', wraps=training.save_checkpoint) as writes, \
                     patch('builtins.print'):
                 training.train(args)
-            gates.assert_not_called()  # Exporting a milestone must not reserve an outdated candidate.
+            self.assertEqual(completed, [16, 24])
             latest = [call.args[1]['games'] for call in writes.call_args_list if call.args[0].name == 'latest.pt']
             self.assertEqual(latest, [8, 16, 24])  # One full save per milestone, including the final boundary.
             saved = training.load_state(root / 'latest.pt')
             self.assertEqual(saved['games'], 24)
             self.assertIsNone(saved['gate'])
-            self.assertFalse(list(root.glob('gate-model-*.json')))
             gate = training.next_gate(root, args.rules, saved['settings'], training._code_sha256(), 20 * GIB)
-            self.assertEqual(gate, 'gate-model-00000024.json')
+            self.assertIsNone(gate)
 
     def test_new_gate_uses_latest_milestone_without_backlog(self):
         with tempfile.TemporaryDirectory() as name:
@@ -554,7 +563,7 @@ class EngineTests(unittest.TestCase):
             self.assertFalse((root / 'gate-model-00003000.json').exists())
             self.assertEqual({path.name: path.read_bytes() for path in (root / 'models').glob('*.pt')}, frozen)
 
-    def test_slow_gate_loading_does_not_starve_scheduled_evaluation(self):
+    def test_full_evaluation_includes_model_loading_time_and_blocks_learning(self):
         device_for('cpu')
         with tempfile.TemporaryDirectory() as name:
             root, rules = Path(name), Rules(4, 4, 4)
@@ -582,7 +591,7 @@ class EngineTests(unittest.TestCase):
             def slow_load(path, rules=None, **kwargs):
                 if path.parent.name == 'models':
                     loads.append(path.name)
-                    clock[0] += 1.1  # Two loads exceed the entire two-second evaluation slice.
+                    clock[0] += 1.1
                 return original(path, rules, **kwargs)
             def action(game, *a, **kw):
                 clock[0] += .05
@@ -597,33 +606,42 @@ class EngineTests(unittest.TestCase):
             self.assertCountEqual(loads, ['model-00000008.pt', 'model-00000016.pt'])
             saved = training.load_state(root / 'latest.pt')
             self.assertEqual((saved['games'], saved['step']), (16, 0))
-            # Setup still consumes evaluation credit; caching must not hide it from the 80/20 budget.
+            report = json.loads((root / gate).read_text())
+            self.assertTrue(report['decision_recorded'])
+            self.assertEqual(len(report['matches']), 100)
+            self.assertIsNone(saved['gate'])
+            # Model loading belongs to the evaluation phase, too.
             self.assertAlmostEqual(saved['phase_seconds']['evaluation'], 2.2 + .05 * moves.call_count)
-            self.assertLessEqual(saved['phase_seconds']['evaluation'], 20.)
 
-    def test_evaluation_quota_keeps_training_and_survives_resume(self):
-        self.assertEqual(training.eval_allowance({'training': 80., 'evaluation': 20.}), 0.)
-        self.assertEqual(training.eval_allowance({'training': 80., 'evaluation': 10.}), 10.)
+    def test_interrupted_tournament_finishes_before_training_resumes(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             args = SimpleNamespace(data=name, rules=Rules(4, 4, 4), disk_gib=20, device='cpu', simulations=2,
                 parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=8, seconds=.02,
-                hours=.02, max_games=24, restart_gate=False)
-            clock = [0.]
-            original_batch, original_step, original_action = training.selfplay_batch, training.train_step, training.turn_action
+                hours=.1, max_games=24, restart_gate=False, channels=4, blocks=1, workers=1)
+            clock, moves = [0.], [0]
+            original_batch, original_step = training.selfplay_batch, training.train_step
+            def no_pending_gate():
+                for path in root.glob('gate-model-*.json'):
+                    self.assertTrue(json.loads(path.read_text()).get('decision_recorded'))
             def timed_batch(*a, **kw):
+                no_pending_gate()
                 self.assertLessEqual(len(a[0]), args.parallel)
                 result = original_batch(*a, **kw)
                 clock[0] += 1.
                 return result
             def timed_step(*a, **kw):
+                no_pending_gate()
                 result = original_step(*a, **kw)
                 clock[0] += .1
                 return result
             def timed_action(*a, **kw):
                 self.assertEqual(a[3], args.simulations)
-                result = original_action(*a, **kw)
+                result = int(a[0].actions()[0])
                 clock[0] += .05
+                moves[0] += 1
+                if moves[0] == 30:
+                    (root / 'stop').touch()
                 return result
             with patch.object(training.time, 'monotonic', lambda: clock[0]), \
                     patch.object(training, 'selfplay_batch', timed_batch), \
@@ -638,33 +656,34 @@ class EngineTests(unittest.TestCase):
                 optimizing = next(line for line in lines if line.startswith('optimizing:'))
                 self.assertRegex(optimizing, r'loss \d+\.\d{4} \(policy \d+\.\d{4}, value \d+\.\d{4}\)')
                 self.assertTrue(all(' | next ' in line and 's left' in line for line in lines))
-                self.assertTrue(any('Frozen gate:' in line for line in lines))
                 self.assertIn(' | Saved.', lines[-1])
                 state = training.load_state(root / 'latest.pt')
-                self.assertEqual(state['games'], 24)
-                self.assertTrue((root / 'models/model-00000024.pt').exists())
+                self.assertEqual(state['games'], 16)
+                self.assertFalse((root / 'models/model-00000024.pt').exists())
                 report = json.loads((root / state['gate']).read_text())
                 self.assertFalse(report.get('decision_recorded', False))
                 self.assertTrue(report['matches'] or report['current'])
-                self.assertLessEqual(state['phase_seconds']['evaluation'], state['phase_seconds']['training'] / 4 + .05)
-                before = dict(state['phase_seconds'])
                 training.train(args)
                 resumed = training.load_state(root / 'latest.pt')
-                self.assertEqual(resumed['phase_seconds']['training'], before['training'])
-                self.assertLessEqual(resumed['phase_seconds']['evaluation'], before['training'] / 4 + .05)
+                self.assertEqual(resumed['games'], 24)
+                self.assertIsNone(resumed['gate'])
+                previous = {path.name: path.read_bytes() for path in root.glob('gate-model-*.json')}
+                self.assertTrue(all(json.loads(content)['decision_recorded'] for content in previous.values()))
+                training.train(args)
+                self.assertEqual({path.name: path.read_bytes() for path in root.glob('gate-model-*.json')}, previous)
+                opponent = json.loads((root / 'incumbent.json').read_text())
                 args.parallel, args.max_games, args.hours = 2, 32, .1
                 training.train(args)
                 smaller = training.load_state(root / 'latest.pt')
                 self.assertEqual(smaller['games'], 32)
                 self.assertEqual(smaller['settings']['parallel'], 2)
-                self.assertEqual(smaller['gate'], state['gate'])  # New milestones must not replace an active gate.
-            # After this gate finishes, skip the backlog and challenge best with the newest milestone.
-            report.update(decision_recorded=True, promoted=False)
-            save_json(root / state['gate'], report)
-            next_name = training.next_gate(root, args.rules, state['settings'], training._code_sha256(), 20 * GIB)
-            next_report = json.loads((root / next_name).read_text())
+                self.assertIsNone(smaller['gate'])
+                self.assertTrue(any('Frozen gate:' in call.args[0] for call in output.call_args_list))
+            next_report = json.loads((root / 'gate-model-00000032.json').read_text())
+            self.assertTrue(next_report['decision_recorded'])
+            self.assertEqual(len(next_report['matches']), 100)
             self.assertEqual(next_report['candidate']['games'], 32)
-            self.assertEqual(next_report['opponent']['games'], 8)
+            self.assertEqual(next_report['opponent']['file'], opponent['file'])
             self.assertEqual(next_report['simulations'], 2)
 
     def test_gate_restart_preserves_old_report_and_immutable_models(self):

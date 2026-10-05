@@ -14,8 +14,7 @@ import urllib.request
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from engine.game import Game, Rules
-from engine.storage import GIB, load_json, run_lock, save_json
-from engine.training import next_gate, _code_sha256
+from engine.storage import load_json, run_lock, save_json
 from playwright.sync_api import sync_playwright, expect
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -222,12 +221,9 @@ with tempfile.TemporaryDirectory() as name:
         '--max-games', '16', '--channels', '4', '--blocks', '1', '--tactical-ms', '0'], cwd=ROOT, capture_output=True, text=True, timeout=90)
     if result.returncode:
         raise RuntimeError(result.stderr)
-    # Normal training intentionally leaves evaluation pending when its 20% credit is exhausted.
+    # The milestone tournament finishes before training returns at the game limit.
     report = 'gate-model-00000016.json'
-    if not (data / report).exists():
-        with run_lock(data):
-            run = load_json(data / 'run.json')
-            assert next_gate(data, Rules(**run['rule_config']), run['settings'], _code_sha256(), 20 * GIB) == report
+    assert load_json(data / report)['decision_recorded']
     result = subprocess.run([sys.executable, '-m', 'engine', 'evaluate', '--data', str(data),
         '--report', report, '--device', 'cpu', '--hours', '.02'],
         cwd=ROOT, capture_output=True, text=True, timeout=90)

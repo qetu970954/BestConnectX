@@ -65,7 +65,7 @@ A tournament uses **100 games**, with 50 shared openings and swapped colors. A c
 
 This is a practical regression filter, **not proof of stronger play**. Losing the tournament does not reset the learner. Self-play keeps using its newest weights; only the accepted best stays unchanged.
 
-Training and evaluation take turns on the GPU. The scheduler aims for roughly **80% training / 20% evaluation**. Without a pending tournament, it spends the time training.
+After each milestone after the initial baseline, training pauses until the **full 100-game tournament** finishes. Self-play and optimization then resume. A safe stop or session deadline saves the unfinished tournament; resume finishes it before learning continues.
 
 Want the search explained visually? Open [How the bot thinks](figures/how-bot-thinks.html). **MCTS** explores future positions; **PUCT** chooses which branches to explore; **TSS** looks for forced wins that must pass independent checking.
 

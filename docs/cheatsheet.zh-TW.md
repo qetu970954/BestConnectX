@@ -125,7 +125,7 @@ uv run python -m engine selfplay --preset connect6 --board-size "15*15" --data d
 - **編號里程碑：留下固定對手。** `models/model-00001000.pt` 代表完成 1,000 盤自我對弈，不是更新 1,000 次。它不能恢復完整 learner。
 - **`best.pt`：跟接受的模型下棋。** `incumbent.json` 決定它對應哪份里程碑；匯出中斷可在續訓時修復。第一份里程碑還沒驗證棋力。
 - **後續升級：100 盤至少 55 分。** 50 組開局交換黑白，棋譜要通過檢查，最大完整回合超時為 0.1 秒。勝一盤得 1 分，和棋得 0.5 分。這是暫定篩檢，不是棋力證明。
-- **升級沒過，仍繼續學。** 只有 best 不變。時間目標大約是 80% 訓練／20% 評估，未完成比賽可以先等，訓練不用停住。
+- **先比完，再繼續學。** 初始基準之後，每個里程碑都完成整場 100 盤比賽，期間暫停自我對弈與學習。升級沒過不會重設學習模型。中斷的比賽也要先完成，才恢復學習。
 - **保留檔案，滿了停止。** 不自動刪掉舊里程碑。`selfplay-stats.json` 只有最近 1,000 盤摘要，不含棋譜；近期 replay 留在 checkpoint，比賽棋譜留給驗證用。
 
 ## 跑檢查
@@ -138,7 +138,7 @@ uv run python -m experiments.benchmark_native --device cpu --output .native-cach
 # 使用者可自行跑的 GPU 檢查，設有程序時間上限
 uv run python -m experiments.benchmark_native --device cuda --batch 64 --simulations 64 --wall-seconds 90 --output .native-cache/cuda-checks.json
 
-# 接著跑既有比賽，不學習；略過 80/20 排程
+# 接著跑既有比賽，不啟動訓練
 uv run python -m engine evaluate --data data/connect6-15x15 --report gate-model-00002000.json
 ```
 

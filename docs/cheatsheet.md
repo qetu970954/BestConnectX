@@ -125,7 +125,7 @@ This prints summary JSON. It does not update weights, save game records, or prov
 - **Numbered milestones: keep a fixed opponent.** `models/model-00001000.pt` means 1,000 completed self-play games, not 1,000 updates. It cannot recover the full learner.
 - **`best.pt`: play with the accepted model.** `incumbent.json` decides which milestone it mirrors. Resume repairs interrupted exports. The first milestone is an unvalidated baseline.
 - **Later promotions: at least 55 points in 100 games.** Fifty paired openings, swapped colors, checked histories, and maximum full-turn overtime of 0.1 seconds. A win earns 1 and a draw 0.5. This is a provisional filter, not proof of strength.
-- **A rejected candidate keeps learning.** Only best stays unchanged. The target is roughly 80% training / 20% evaluation time; unfinished tournaments can wait while training continues.
+- **Finish evaluation, then keep learning.** After each milestone after the initial baseline, the full 100-game tournament runs with self-play and optimization paused. A rejected candidate does not reset the learner. An interrupted tournament finishes before learning resumes.
 - **Keep files; stop at the cap.** No automatic deletion of old milestones. `selfplay-stats.json` keeps the latest 1,000 summaries, not move histories. Recent replay lives in the checkpoint. Tournament histories remain for verification.
 
 ## Run the checks
@@ -138,7 +138,7 @@ uv run python -m experiments.benchmark_native --device cpu --output .native-cach
 # Optional user-run GPU check with a process deadline
 uv run python -m experiments.benchmark_native --device cuda --batch 64 --simulations 64 --wall-seconds 90 --output .native-cache/cuda-checks.json
 
-# Continue an existing tournament without learning; bypasses the 80/20 scheduler
+# Continue an existing tournament without starting training
 uv run python -m engine evaluate --data data/connect6-15x15 --report gate-model-00002000.json
 ```
 

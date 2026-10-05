@@ -69,7 +69,8 @@ def network(root, entry, device, rules, *, cache=None):
     if cache is not None and key in cache:
         return cache[key]
     state = load_state(path, rules)
-    net = Network(**state["config"]).to(device)
+    with torch.random.fork_rng(devices=[]):
+        net = Network(**state["config"]).to(device)
     net.load_state_dict(state["weights"])
     net.eval()
     if cache is not None:
@@ -170,11 +171,6 @@ def _finish_gate(root, path, report, rules, cap):
         report["promoted"] = True
     report["decision_recorded"] = True
     save_json(path, report, root=root, cap=cap)
-
-
-def eval_allowance(phase_seconds):
-    """Evaluation gets one second of credit per four measured training seconds."""
-    return max(0., phase_seconds["training"] / 4 - phase_seconds["evaluation"])
 
 
 def _gate_report(rules, candidate, opponent, settings, code_sha):
@@ -375,7 +371,7 @@ def _train(args, root, rules):
         timings.update(saved.get('timings', {}))
         _flush_exports(root, summaries, pending_metrics, cap)
     boards = [Game.from_moves(row["moves"], rules=rules) for row in active]
-    if not run_info or run_info.get("settings") != settings:
+    if not run_info or run_info.get("settings") != settings or run_info.get("environment") != environment:
         save_json(root / "run.json", {"rules": rules.id, "rule_config": rules.to_dict(),
             "settings": settings, "network": net.config, "environment": environment}, root=root, cap=cap)
     if manifest is None:
@@ -392,7 +388,6 @@ def _train(args, root, rules):
     stopped = lambda: interrupted[0] or stop_file.exists() or time.monotonic() >= deadline
     last_status = start
     checkpoint_needed = True
-    gate_models = {}  # Only the current gate's two frozen networks; never checkpointed.
 
     def checkpoint():
         nonlocal checkpoint_needed
@@ -461,20 +456,17 @@ def _train(args, root, rules):
             milestone(save=False)
         while not stopped():
             began, phase = time.monotonic(), "training"
-            credit = eval_allowance(phase_seconds)
-            if gate is None and credit >= max(1., settings["gate_seconds"] + .05):
+            if gate is None:
                 gate = next_gate(root, rules, settings, environment["code_sha256"], cap)
-            if gate and credit >= max(1., load_json(root / gate)["seconds_per_turn"] + .05):
+            if gate:
                 phase = "evaluation"
-                checkpoint_needed = True
-                # ponytail: serial gate slices; batch evaluation only if search throughput requires it.
-                until = min(deadline, began + min(credit, max(2., settings["gate_seconds"] + .05)))
-                gate_stopped = lambda: stopped() or time.monotonic() >= until
-                result = run_gate(root, gate, rules, device, until, gate_stopped, cap, status,
-                                  model_cache=gate_models)
+                result = run_gate(root, gate, rules, device, deadline, stopped, cap, status)
                 if result.get("decision_recorded"):
                     gate = None
-                    gate_models.clear()
+                else:
+                    checkpoint_needed = True
+                    phase_seconds[phase] += time.monotonic() - began
+                    break
             elif since_update >= 8 or (games >= last_milestone + settings["snapshot_every"] and since_update):
                 checkpoint_needed = True
                 # Preserve learning work when a larger batch finishes more than eight games at once.

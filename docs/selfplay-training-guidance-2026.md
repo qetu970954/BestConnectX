@@ -19,12 +19,14 @@ The implemented policy is:
 | First milestone | Initial baseline, not a strength-validated model |
 | Promotion | 100 games / 50 shared-opening color-swapped pairs; at least 55 points; all histories verified; maximum turn overtime 0.1 seconds |
 | Default gate limits | 0.25 seconds per full turn, including both Connect6 placements; equal simulation caps, default 64 |
-| Evaluation schedule | One evaluation second per four measured training seconds; GPU work alternates, unfinished gates can wait |
+| Evaluation schedule | After each milestone after the initial baseline, finish the full 100-game tournament with self-play and optimization paused; then resume training |
 | Retention | Keep every numbered milestone; stop at the disk cap instead of deleting old files |
 | Tuning | Keep defaults at batch 128 / concurrency 64 / six workers until a separate decision |
 | Replay capacity | New runs store all eight board views per completed position, with 400,000 entries retaining 50,000 originals; existing checkpoints keep their saved limit |
 
-Later user requests changed replay capacity and tournament candidate selection. With the default 1,000-game milestones, self-play at 10,450 games supplies `model-00010000.pt` for the next comparison against the accepted best. An active 2,000-game comparison finishes first; the next one skips 3,000–9,000. If the newest milestone has already been tested, wait for a newer one rather than testing the older backlog. All checkpoint files stay on disk; the live `latest.pt` does not change a tournament's models.
+Later user requests changed replay capacity and tournament candidate selection. On resume from an older run, an active comparison finishes first; the next comparison uses the newest untested milestone and skips any older backlog. Normal training now waits for each milestone's tournament before creating the next milestone. All checkpoint files stay on disk; the live `latest.pt` does not change a tournament's models.
+
+Automatic, separate phases simplify the training loop. Each tournament runs to completion before self-play or optimization continues. The former 80/20 time allowance and short evaluation slices are removed. A safe stop or session deadline preserves an unfinished tournament, which resume completes before learning. This change does not establish a speed or strength improvement.
 
 The eight-view, 400,000-entry default is user-selected, not a measured strength improvement. Learning batch size is unchanged. Historical profiling and trials below used 20,000 original positions; those measurements have not been repeated with the larger stored buffer.
 
