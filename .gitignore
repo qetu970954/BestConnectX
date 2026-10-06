@@ -34,5 +34,19 @@ experiments/*_results.json
 *.html
 *.jsonl
 
-# Local session transcripts
+# Local session transcripts and personal drafts
 codex-session-*.md
+/linkedin-post.md
+
+# Local credentials and private keys
+.env
+.env.*
+!.env.example
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
