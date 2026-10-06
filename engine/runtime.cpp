@@ -564,10 +564,10 @@ EXPORT int runtime_decide(const std::int8_t* boards,const int* metadata,const in
         timings[0]=std::max(0.,seconds(began)-inference); timings[1]=inference; return completed;
     } catch (const Limit&) { return -2; } FAIL
 }
-EXPORT int runtime_turn(const std::int8_t* board,const int* meta,const int* history,int count,void* model,double duration,
+EXPORT int runtime_turn(const std::int8_t* board,const int* meta,const int* history,int count,void* model,double duration,int simulations,
                         const int* stored,int stored_count,int* output,int* out_strategy,int* out_count,int capacity,double* elapsed) {
     try {
-        if (!std::isfinite(duration) || duration<0 || duration>30 || stored_count<0 || stored_count>capacity) throw std::invalid_argument("Invalid full-turn request.");
+        if (!std::isfinite(duration) || duration<0 || duration>30 || simulations<0 || simulations>100000 || stored_count<0 || stored_count>capacity) throw std::invalid_argument("Invalid full-turn request.");
         Position game(board,meta,history,count); if (game.done) throw std::invalid_argument("Game has ended.");
         auto began=Clock::now(); int color=game.player, played=0;
         Cells strategy(stored,stored+stored_count); int plan[2]={-1,-1};
@@ -576,8 +576,8 @@ EXPORT int runtime_turn(const std::int8_t* board,const int* meta,const int* hist
             int offsets[2]={0,static_cast<int>(game.moves.size())}, saved_offsets[2]={0,static_cast<int>(strategy.size())};
             int chosen[1], source[1], next_plan[2], next_offsets[2]; double timings[2];
             std::vector<float> policy(game.n*game.n); Cells next_strategy(capacity);
-            double remaining=std::max(0.,duration-seconds(began))/game.left;
-            int result=runtime_decide(game.board.data(),state,game.moves.data(),offsets,1,model,100000,1,0,1,0,1,50,
+            double remaining=simulations ? 604800 : std::max(0.,duration-seconds(began))/game.left;
+            int result=runtime_decide(game.board.data(),state,game.moves.data(),offsets,1,model,simulations ? simulations : 100000,1,0,1,0,1,50,
                 remaining,nullptr,strategy.data(),saved_offsets,plan,policy.data(),chosen,source,next_plan,
                 next_strategy.data(),next_offsets,capacity,timings);
             if (result==-1) throw std::runtime_error(last_error());

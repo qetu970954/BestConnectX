@@ -35,7 +35,7 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 
 Ctrl+C 也會要求安全停止。**看到 Saved 後再關終端機。** 兩小時限制算的是訓練迴圈，啟動和最後存檔還會多花一點時間。目錄裡已有 checkpoint，就會續訓，不會換成全新模型。想做另一個實驗，請改 `--data`。
 
-Dashboard 網址是 **http://127.0.0.1:8765**。可選 English／繁體中文，瀏覽器會記住選擇。思考時間選單提供每完整回合 **0.5、1、2、4、8、16 秒**。要跟 bot 下棋，先暫停訓練。方向鍵移動焦點，Enter／Space 落子。第二個 dashboard 可加 `--port 8766`。沒有 CUDA？把 `--device cuda` 換成 `--device cpu`；小型 CPU 檢查也可以加 `--workers 1`。
+Dashboard 網址是 **http://127.0.0.1:8765**。可選 English／繁體中文，瀏覽器會記住選擇。MCTS 選單提供**每次落子 32–4,096 次模擬**，預設 64。戰術落子與啟發式對手可能提早完成；載入模型也需時間。**悔棋**會退回你最近一次落子及後續 AI 回應，包含六子棋未完成的回合。要跟 bot 下棋，先暫停訓練。方向鍵移動焦點，Enter／Space 落子。第二個 dashboard 可加 `--port 8766`。沒有 CUDA？把 `--device cuda` 換成 `--device cpu`；小型 CPU 檢查也可以加 `--workers 1`。
 
 要使用較大的六子棋設定，並保持**每次學習 batch 256**：
 
@@ -88,7 +88,8 @@ uv run python train.py --preset connect6-attention --board-size "15*15" --data d
 | `--parallel 64` | 同時進行的自我對弈棋局；續訓可改 |
 | `--batch 128` | 每次學習更新的樣本數；續訓沿用 checkpoint |
 | `--learning-rate 0.001` | 新 run 的固定 AdamW 學習率；續訓沿用保存值 |
-| `--simulations 64` | 每次落子的搜尋模擬數；續訓沿用保存值 |
+| `--simulations 400` | 每次落子的搜尋模擬數；續訓沿用保存值 |
+| `--tactical-ms 10` | 自我對弈每個局面的戰術時間預算；續訓沿用保存值 |
 | `--channels 64 --blocks 6` | 模型寬度和殘差深度；更改要新 run |
 | `--architecture attention` | 實驗模型設計；預設 `residual` |
 | `--replay-limit 400000` | 已存入的對稱視角；預設 400,000 筆＝50,000 個原始局面；續訓沿用保存值 |
@@ -126,7 +127,7 @@ uv run python -m engine selfplay --preset connect6 --board-size "15*15" --data d
 - **`best.pt`：跟接受的模型下棋。** `incumbent.json` 決定它對應哪份里程碑；匯出中斷可在續訓時修復。第一份里程碑還沒驗證棋力。
 - **後續升級：100 盤至少 55 分。** 50 組開局交換黑白，棋譜要通過檢查，最大完整回合超時為 0.1 秒。勝一盤得 1 分，和棋得 0.5 分。這是暫定篩檢，不是棋力證明。
 - **先比完，再繼續學。** 初始基準之後，每個里程碑都完成整場 100 盤比賽，期間暫停自我對弈與學習。升級沒過不會重設學習模型。中斷的比賽也要先完成，才恢復學習。
-- **保留檔案，滿了停止。** 不自動刪掉舊里程碑。`selfplay-stats.json` 只有最近 1,000 盤摘要，不含棋譜；近期 replay 留在 checkpoint，比賽棋譜留給驗證用。
+- **保留檔案，滿了停止。** 不自動刪掉舊里程碑。`selfplay-stats.json` 只有最近 1,000 盤摘要，不含棋譜；dashboard 在 checkpoint 前也會從 `status.json` 讀取約每三秒更新的即時摘要與抽樣 loss，完整 loss 歷史則在 checkpoint 發布；近期 replay 留在 checkpoint，比賽棋譜留給驗證用。
 
 ## 跑檢查
 

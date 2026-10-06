@@ -410,8 +410,13 @@ def _train(args, root, rules):
         if phase not in ("paused", "error") and now - last_status < 3:
             return
         last_status = now
+        # Live telemetry is bounded and separate from checkpoint-owned recovery/history.
+        count = min(500, len(pending_metrics))
         payload = {"phase": phase, "message": message, "rules": rules.id, "device": str(device),
             "games": games, "updates": steps, "replay_positions": len(replay), "loss_metrics": loss_metrics,
+            "selfplay_summaries": summaries[-1000:],
+            "loss_history": [pending_metrics[i * (len(pending_metrics) - 1) // max(1, count - 1)]
+                             for i in range(count)],
             "next_milestone": last_milestone + settings["snapshot_every"], "phase_seconds": phase_seconds.copy(),
             "evaluation_share": phase_seconds["evaluation"] / max(1e-9, sum(phase_seconds.values())),
             'parallel': settings['parallel'], 'workers': settings['workers'], 'network': net.config,

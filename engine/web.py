@@ -2,14 +2,13 @@
 from collections import Counter
 from functools import lru_cache
 import json
-import math
 from pathlib import Path
 from statistics import mean, median
 import secrets
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from .runtime import DEFAULT_RULES, Game, Rules
+from .runtime import DEFAULT_RULES, Game, Rules, backend
 from .storage import busy, load_json, save_json, usage
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,7 +23,7 @@ class _DashboardServer(HTTPServer):
 
 @lru_cache(maxsize=1)
 def _selfplay_stats(content):
-    """Summarize checkpoint-published rows, without reading any move histories."""
+    """Summarize completed-game telemetry, without reading any move histories."""
     records = list(reversed(json.loads(content).get('summaries', [])[-1000:]))
     count = len(records)
     lengths = [row['placements'] for row in records]
@@ -49,9 +48,12 @@ def _selfplay_stats(content):
 
 def history(data):
     # ponytail: recent 200 metric batches bound dashboard reads; all raw history stays on disk.
+    live = load_json(data / 'status.json', {})
     rows = []
     for path in sorted((data / "metrics").glob("updates-*.json"))[-200:]:
         rows.extend(load_json(path, []))
+    rows.extend(live.get('loss_history', []))
+    rows = sorted({row['step']: row for row in rows}.values(), key=lambda row: row['step'])
     if len(rows) > 500:
         rows = [rows[i * (len(rows) - 1) // 499] for i in range(500)]
     gates = []
@@ -64,7 +66,10 @@ def history(data):
             "score": report.get("score"), "win_rate": report.get("win_rate")})
     models = [{"file": p.name, "games": int(p.stem.rsplit("-", 1)[-1])}
               for p in sorted((data / "models").glob("model-*.pt"))]
-    selfplay = _selfplay_stats(json.dumps(load_json(data / 'selfplay-stats.json', {'summaries': []})))
+    summaries = live.get('selfplay_summaries')
+    if summaries is None:  # Runs started before live telemetry keep their checkpoint view.
+        summaries = load_json(data / 'selfplay-stats.json', {'summaries': []}).get('summaries', [])
+    selfplay = _selfplay_stats(json.dumps({'summaries': summaries}))
     return {"metrics": rows, "gates": gates, "models": models, "selfplay": selfplay}
 
 
@@ -78,9 +83,16 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
         if (data / "latest.pt").exists() or (data / "incumbent.json").exists():
             raise ValueError("Unrecognized data directory. Do not use legacy Connect6 artifacts here.")
         save_json(data / "run.json", {"rules": rules.id, "rule_config": rules.to_dict()})
+    backend()  # Load LibTorch/native rules before the first human placement.
     token = secrets.token_urlsafe(32)
     origin = f"http://127.0.0.1:{port}"
     game, human, strategy, model_used = Game(rules=rules), 1, None, None
+    undo = []
+
+    def game_state():
+        return {"board": game.board.tolist(), "player": game.player,
+            "left": game.left, "done": game.done, "winner": game.winner,
+            "moves": game.moves, "human": human, "size": game.size, "can_undo": bool(undo)}
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -116,9 +128,7 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                 status["incumbent"] = load_json(data / "incumbent.json", {"kind": "heuristic", "id": "heuristic"})
                 status["running"] = busy(data)
                 status["artifact_bytes"] = usage(data)
-                status["game"] = {"board": game.board.tolist(), "player": game.player,
-                    "left": game.left, "done": game.done, "winner": game.winner,
-                    "moves": game.moves, "human": human, "size": game.size}
+                status["game"] = game_state()
                 status['rule_config'] = rules.to_dict()
                 status['network'] = (load_json(data / 'run.json', {}).get('network') or status.get('network'))
                 status['backend'] = 'cpp-libtorch'
@@ -146,24 +156,31 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                     if type(color) is not int or color not in (-1, 1):
                         raise ValueError("Choose black or white.")
                     game, human, strategy, model_used = Game(rules=rules), color, None, None
+                    undo.clear()
                 elif self.path == "/api/move":
                     if game.done or game.player != human:
                         raise ValueError("It is not your turn.")
+                    previous = game.copy()
                     game.play(payload.get("cell"))
+                    undo.append((previous, strategy, model_used))
+                elif self.path == "/api/undo":
+                    if not undo:
+                        raise ValueError("No human placement to undo.")
+                    game, strategy, model_used = undo.pop()
                 elif self.path == "/api/bot":
                     if game.done or game.player == human:
                         raise ValueError("It is not the bot's turn.")
                     if busy(data):
                         raise ValueError("Pause the CLI training process before GPU-assisted bot play.")
-                    seconds = float(payload.get("seconds", 5))
-                    if not math.isfinite(seconds) or not .02 <= seconds <= 30:
-                        raise ValueError("Thinking time must be between 0.02 and 30 seconds.")
+                    simulations = payload.get("simulations", 64)
+                    if type(simulations) is not int or not 1 <= simulations <= 4096:
+                        raise ValueError("MCTS simulations must be an integer between 1 and 4096.")
                     model = payload.get("model", "best")
                     if not isinstance(model, str) or len(model) > 80:
                         raise ValueError("Invalid model selection.")
                     request = {"moves": game.moves, "strategy": strategy if model == model_used else None}
                     result = subprocess.run([sys.executable, "-m", "engine", "play", "--data", str(data),
-                        "--model", model, "--seconds", str(seconds)], cwd=ROOT,
+                        "--model", model, "--simulations", str(simulations)], cwd=ROOT,
                         input=json.dumps(request), capture_output=True, text=True, timeout=120)
                     if result.returncode:
                         raise RuntimeError("Bot failed: " + result.stderr[-1200:])
@@ -179,7 +196,7 @@ def serve(port, data, open_browser=False, rules=DEFAULT_RULES):
                     game, strategy, model_used = updated, reply.get("strategy"), model
                 else:
                     return self.send(404, {"error": "Not found."})
-                return self.send(200, {})
+                return self.send(200, {"game": game_state()})
             except (ValueError, TypeError, KeyError) as exc:
                 self.send(400, {"error": str(exc)})
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:

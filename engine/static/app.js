@@ -10,8 +10,8 @@ const TEXT = {
     boardRegion: 'Connection game board', board: 'BOARD', turnBlackFirst: 'Black moves first', cellsDefault: '81 cells',
     boardAriaDefault: 'Board; use arrow keys to move and Enter to play', gameDetailDefault: 'Connect five or more stones to win.',
     color: 'Your color', black: 'Black', white: 'White', model: 'Opponent', best: 'Current best', heuristic: 'Heuristic baseline',
-    thinkingSeconds: 'Think time', newGame: 'New game', aiMove: 'AI move',
-    pauseTraining: 'Pause CLI training before asking the GPU bot to move.', trainingStatusAria: 'Training status and CLI command',
+    thinkingSimulations: 'MCTS/stone', undoMove: 'Undo', newGame: 'New game', aiMove: 'AI move',
+    pauseTraining: 'Pause CLI training before bot play. MCTS limit is per stone; tactical moves can finish sooner. Model startup adds to the wait.', trainingStatusAria: 'Training status and CLI command',
     trainingStatus: 'TRAINING STATUS', notStarted: 'Not started', selfplayGames: 'Self-play games', optimizationUpdates: 'Learning updates',
     replayPositions: 'Replay positions', artifacts: 'Saved artifacts',
     trainCommandDefault: 'uv run python train.py · Run again to resume; Ctrl+C saves safely.', nativeEngine: 'Native C++ / LibTorch engine',
@@ -20,7 +20,7 @@ const TEXT = {
     recentSelfplay: 'LATEST 1,000 TRAINING SELF-PLAY GAMES', noCompletedSummary: 'No completed-game summaries yet',
     meanPlacements: 'Mean placements', meanTurns: 'Mean turns', medianPlacements: 'Median placements',
     lengthAndSources: 'Length range and move sources', noLength: 'No length data yet', noSources: 'No move-source data yet',
-    selfplayDisclaimer: 'Updated at checkpoints; evaluation games are excluded. Rates use all games, including draws, and do not measure playing strength.',
+    selfplayDisclaimer: 'Updated during training (about every 3 seconds); evaluation games are excluded. Rates use all games, including draws, and do not measure playing strength.',
     trainingLoss: 'TRAINING LOSS', lossFormula: 'L = policy cross-entropy + value mean-square error', totalLoss: 'Total loss',
     policy: 'Policy', value: 'Value', chartSampling: '(sampled curves; complete raw data stays on disk)',
     lossChartAria: 'Training loss chart', noTrainingUpdates: 'No learning updates yet',
@@ -38,7 +38,7 @@ const TEXT = {
     defaultStatus: 'Loss is diagnostic; a candidate needs at least 55% over 100 games for provisional promotion.',
     noSelfplaySummary: 'No completed-game summaries yet', sourceSuffix: 'Opening stones are excluded.',
     noModelRuntime: 'C++ / LibTorch · no trained model yet; native heuristic play is available',
-    noTimingDetail: 'Search, inference, learning, and save times update at CLI checkpoints; an unmeasured value is not zero cost.',
+    noTimingDetail: 'Search, inference, learning, and save times update during training; an unmeasured value is not zero cost.',
     promoted: 'promoted', retained: 'kept current best', evaluating: 'evaluating',
     initialBaseline: 'Initial milestone baseline; strength not validated', acceptedModel: 'Accepted model (provisional)',
     latestUnvalidated: 'Latest learner · not evaluated', currentBestSuffix: 'current best', thinking: 'AI is thinking…',
@@ -74,8 +74,8 @@ const TEXT = {
     boardRegion: '連棋對戰', board: '棋盤', turnBlackFirst: '黑棋先下', cellsDefault: '81 格',
     boardAriaDefault: '棋盤；方向鍵移動，Enter 下棋', gameDetailDefault: '連成五子或以上即可獲勝。',
     color: '執子顏色', black: '黑棋', white: '白棋', model: '對戰模型', best: '目前最佳', heuristic: '啟發式基準',
-    thinkingSeconds: '思考秒數', newGame: '新對局', aiMove: 'AI 落子',
-    pauseTraining: '訓練期間使用 GPU 時，請先在 CLI 暫停訓練，再與 GPU AI 對戰。', trainingStatusAria: '訓練狀態與 CLI 指令',
+    thinkingSimulations: 'MCTS／子', undoMove: '悔棋', newGame: '新對局', aiMove: 'AI 落子',
+    pauseTraining: '請先暫停 CLI 訓練再對局。MCTS 上限按每次落子計算；戰術落子可能提早完成，載入模型也需時間。', trainingStatusAria: '訓練狀態與 CLI 指令',
     trainingStatus: '訓練狀態', notStarted: '尚未開始', selfplayGames: '自我對弈棋局', optimizationUpdates: '最佳化更新',
     replayPositions: 'Replay 位置', artifacts: '保存產物',
     trainCommandDefault: 'uv run python train.py · 再次執行以續訓，Ctrl+C 安全存檔。', nativeEngine: 'C++ / LibTorch 原生引擎',
@@ -83,7 +83,7 @@ const TEXT = {
     recentSelfplay: '最近 1,000 盤訓練自我對弈', noCompletedSummary: '尚無完整棋局摘要',
     meanPlacements: '平均落子數', meanTurns: '平均回合數', medianPlacements: '落子數中位數',
     lengthAndSources: '長度範圍與落子來源', noLength: '尚無長度資料', noSources: '尚無落子來源資料',
-    selfplayDisclaimer: '每次存檔更新；不含評估對局。勝率以全部棋局為分母（含和棋），不代表棋力。',
+    selfplayDisclaimer: '訓練期間約每 3 秒更新；不含評估對局。勝率以全部棋局為分母（含和棋），不代表棋力。',
     trainingLoss: '訓練 Loss', lossFormula: 'L = 策略交叉熵 + 價值均方誤差', totalLoss: '總 loss', policy: '策略', value: '價值',
     chartSampling: '（曲線抽樣，原始數據完整保存）', lossChartAria: '訓練 loss 圖', noTrainingUpdates: '尚無訓練更新',
     gateTitle: '候選模型對目前最佳 · 每版 100 場', scoreLegend: '得分率：勝 1、和 0.5', winRate: '純勝率',
@@ -96,7 +96,7 @@ const TEXT = {
     trainingRunning: 'CLI 訓練執行中；暫停後可請求 AI 落子。', noMilestonePreview: '尚無里程碑模型；啟發式預覽',
     defaultStatus: 'Loss 僅供診斷；100 場得分至少 55% 才可暫定升級。', noSelfplaySummary: '尚無完整棋局摘要',
     sourceSuffix: '不含預設開局子。', noModelRuntime: 'C++ / LibTorch · 尚無訓練模型；可使用原生啟發式對戰',
-    noTimingDetail: '搜尋／推論／學習／保存時間會在 CLI 檢查點更新；未量測值不代表零成本。',
+    noTimingDetail: '搜尋／推論／學習／保存時間隨 CLI 即時進度更新；未量測值不代表零成本。',
     promoted: '已升級', retained: '保留舊版', evaluating: '評估中', initialBaseline: '初始里程碑基準；棋力尚未驗證',
     acceptedModel: '已接受模型（暫定）', latestUnvalidated: '最新訓練模型 · 未驗證', currentBestSuffix: '目前最佳', thinking: 'AI 正在思考…',
     phase_bootstrap: '啟動資料', phase_self_play: '自我對弈', phase_optimizing: '最佳化', phase_evaluating: '評估中',
@@ -125,7 +125,7 @@ const TEXT = {
   }
 };
 let state = null, history = {metrics: [], gates: [], models: []}, pending = false, polling = false;
-let size = 0, language = initialLanguage();
+let size = 0, language = initialLanguage(), gameRevision = 0;
 const cells = [];
 let currentNotice = {kind: 'text', value: '', error: false};
 
@@ -172,7 +172,8 @@ function localizeServer(text) {
     'Invalid local request token or origin.': '本機請求 token 或來源無效。', 'Expected a JSON object.': '需要 JSON 物件。',
     'Choose black or white.': '請選黑棋或白棋。', 'It is not your turn.': '現在不是你的回合。',
     'Pause the CLI training process before GPU-assisted bot play.': '請先暫停 CLI 訓練，再讓 GPU bot 落子。',
-    'Thinking time must be between 0.02 and 30 seconds.': '思考時間必須介於 0.02 到 30 秒。',
+    'MCTS simulations must be an integer between 1 and 4096.': 'MCTS 模擬次數必須是 1 到 4096 的整數。',
+    'No human placement to undo.': '尚無可悔棋的落子。',
     'Invalid model selection.': '模型選擇無效。', 'Bot reply crosses a turn boundary.': 'Bot 回覆跨過回合邊界。',
     'Bot did not finish its turn.': 'Bot 沒有完成整個回合。', 'Not found.': '找不到資源。'
   };
@@ -278,6 +279,7 @@ function render() {
   $('game-detail').textContent = state.running ? t('trainingRunning') : t('winCondition', {connect: rules.connect});
   $('bot-move').disabled = pending || state.running || game.done || game.player === game.human;
   $('new-game').disabled = pending; $('model').disabled = pending;
+  $('undo-move').disabled = pending || !game.can_undo;
   $('phase').textContent = state.running ? phaseLabel(state.phase) : phaseLabel(state.phase === 'error' ? 'error' : state.phase === 'not_started' ? 'not_started' : 'paused');
   for (const [id, key] of [['games', 'games'], ['updates', 'updates'], ['replay', 'replay_positions']]) $(id).textContent = formatNumber(state[key]);
   $('storage').textContent = `${(Number(state.artifact_bytes || 0) / 2**30).toFixed(2)} GiB`;
@@ -326,31 +328,45 @@ function render() {
   if (state.phase === 'error') serverNotice(state.message, true);
 }
 async function refresh() {
-  if (polling) return;
+  if (polling || pending) return;
   polling = true;
+  const revision = gameRevision;
   try {
-    const [status, records] = await Promise.all([fetch('/api/status'), fetch('/api/history')]);
-    if (!status.ok || !records.ok) throw new Error('Dashboard connection failed.');
-    state = await status.json(); history = await records.json(); render();
+    await Promise.all([
+      (async () => {
+        const status = await fetch('/api/status');
+        if (!status.ok) throw new Error('Dashboard connection failed.');
+        const updated = await status.json();
+        if (state && (pending || revision !== gameRevision)) updated.game = state.game;
+        state = updated; render();
+      })(),
+      (async () => {
+        const records = await fetch('/api/history');
+        if (!records.ok) throw new Error('Dashboard connection failed.');
+        history = await records.json(); render();
+      })()
+    ]);
   } catch (error) { serverNotice(error.message, true); }
   finally { polling = false; }
 }
 async function action(path, body) {
   if (pending) return false;
-  pending = true; render();
+  pending = true; gameRevision++; render();
   let success = false;
   try {
     const response = await fetch(path, {method: 'POST', headers: {'Content-Type': 'application/json', 'X-Engine-Token': token}, body: JSON.stringify(body)});
     const reply = await response.json();
     if (!response.ok) throw new Error(reply.error || 'Request failed.');
+    state.game = reply.game;
     notice(''); success = true;
   } catch (error) { serverNotice(error.message, true); }
-  finally { pending = false; await refresh(); render(); }
+  finally { pending = false; render(); }
   return success;
 }
-async function bot() { noticeKey('thinking'); await action('/api/bot', {model: $('model').value, seconds: Number($('seconds').value)}); }
+async function bot() { noticeKey('thinking'); await action('/api/bot', {model: $('model').value, simulations: Number($('simulations').value)}); }
 $('language').addEventListener('change', event => setLanguage(event.target.value));
 $('bot-move').addEventListener('click', bot);
+$('undo-move').addEventListener('click', () => action('/api/undo', {}));
 $('new-game').addEventListener('click', async () => {
   if (await action('/api/new', {human: Number($('color').value)}) && state.game.player !== state.game.human && !state.running) await bot();
 });

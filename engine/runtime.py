@@ -31,7 +31,7 @@ def backend():
     lib.runtime_decide.argtypes = [boards, ints, ints, ints, C.c_int, C.c_void_p, C.c_int, C.c_int, C.c_uint64,
         C.c_int, C.c_int, C.c_int, C.c_double, C.c_double, STOP, ints, ints, ints,
         floats, ints, ints, ints, ints, ints, C.c_int, doubles]
-    lib.runtime_turn.argtypes = [boards, ints, ints, C.c_int, C.c_void_p, C.c_double,
+    lib.runtime_turn.argtypes = [boards, ints, ints, C.c_int, C.c_void_p, C.c_double, C.c_int,
         ints, C.c_int, ints, ints, C.POINTER(C.c_int), C.c_int, C.POINTER(C.c_double)]
     lib.model_create.argtypes = [C.c_int, C.c_int, C.c_int, C.c_char_p]
     lib.model_create.restype = C.c_void_p
@@ -248,13 +248,15 @@ def encode_strategy(strategy):
         return []
 
 
-def full_turn(game, net, duration, strategy=None):
+def full_turn(game, net, duration, strategy=None, *, simulations=None):
+    if simulations is not None and (type(simulations) is not int or not 1 <= simulations <= 100000):
+        raise ValueError('MCTS simulations must be an integer between 1 and 100000.')
     board, meta, history = packet(game); model = model_for(net)
     stored = np.asarray(encode_strategy(strategy), dtype=np.int32)
     moves = np.empty(2, dtype=np.int32); out_strategy = np.empty(1_000_000, dtype=np.int32)
     size = C.c_int(); elapsed = C.c_double()
     count = check(backend().runtime_turn(board, meta, history, len(history), model.handle if model else None,
-        duration, stored, len(stored), moves, out_strategy, C.byref(size), len(out_strategy), C.byref(elapsed)))
+        duration, simulations or 0, stored, len(stored), moves, out_strategy, C.byref(size), len(out_strategy), C.byref(elapsed)))
     values = out_strategy[:size.value]
     cached = {'history': values[1:1+values[0]].tolist(), 'proof': decode_proof(values[1+values[0]:])} if len(values) else None
     return moves[:count].tolist(), cached, elapsed.value

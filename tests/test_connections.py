@@ -246,6 +246,12 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(len(reply['moves']), 2)
             game = Game.from_moves([84, *reply['moves']], rules=rules)
             self.assertEqual((game.player, game.left), (1, 2))
+            result = cli('-m', 'engine', 'play', '--data', name, '--model', 'latest', '--device', 'cpu',
+                         '--simulations', '4', stdin=json.dumps({'moves': [84]}))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            reply = json.loads(result.stdout)
+            self.assertEqual(len(reply['moves']), 2)
+            self.assertEqual(Game.from_moves([84, *reply['moves']], rules=rules).player, 1)
             result = cli('-m', 'engine', 'play', '--data', name, '--model', '../latest.pt',
                          '--device', 'cpu', stdin=json.dumps({'moves': [84]}))
             self.assertNotEqual(result.returncode, 0)
@@ -273,6 +279,56 @@ class EngineTests(unittest.TestCase):
             self.assertTrue(saved['replay'])
             self.assertGreater(saved['timings']['cpu_search_seconds'], 0.)
             self.assertFalse((Path(name) / 'models').exists())
+
+    def test_dashboard_updates_before_checkpoint_and_after_resume(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            args = SimpleNamespace(data=name, rules=Rules(3, 3, 3), disk_gib=20, device='cpu',
+                simulations=1, parallel=8, batch=2, seed=5070, tactical_ms=0, snapshot_every=1000,
+                seconds=.25, hours=1, max_games=16, channels=4, blocks=1, workers=1)
+            clock, observed = [0.], []
+            original_json, original_batch, original_step = training.save_json, training.selfplay_batch, training.train_step
+            def publish(path, value, **kwargs):
+                original_json(path, value, **kwargs)
+                if path.name == 'status.json' and value['phase'] in ('bootstrap', 'self_play', 'optimizing'):
+                    observed.append((copy.deepcopy(value), history(root)))
+            def batch(*a, **kw):
+                result = original_batch(*a, **kw)
+                clock[0] += 3.
+                return result
+            def step(*a, **kw):
+                result = original_step(*a, **kw)
+                clock[0] += 3.
+                return result
+            with patch.object(training.time, 'monotonic', lambda: clock[0]), \
+                    patch.object(training, 'save_json', publish), \
+                    patch.object(training, 'selfplay_batch', batch), \
+                    patch.object(training, 'train_step', step), \
+                    patch.object(training, 'save_checkpoint', wraps=training.save_checkpoint) as writes, \
+                    patch('builtins.print'):
+                training.train(args)
+                saved = (root / 'latest.pt').read_bytes()
+                args.max_games = 24
+                def resumed_publish(path, value, **kwargs):
+                    publish(path, value, **kwargs)
+                    if path.name == 'status.json' and value['phase'] not in ('paused', 'error'):
+                        self.assertEqual((root / 'latest.pt').read_bytes(), saved)
+                with patch.object(training, 'save_json', resumed_publish):
+                    training.train(args)
+            self.assertEqual([call.args[1]['games'] for call in writes.call_args_list
+                              if call.args[0].name == 'latest.pt'], [16, 24])
+            self.assertTrue(any(status['updates'] == 1 for status, _ in observed))
+            self.assertTrue(any(status['games'] > 16 for status, _ in observed))
+            for status, records in observed:
+                with self.subTest(phase=status['phase'], games=status['games'], updates=status['updates']):
+                    self.assertEqual(records['selfplay']['last_game'], status['games'] or None)
+                    self.assertEqual(records['selfplay']['games'], min(1000, status['games']))
+                if status['updates']:
+                    with self.subTest(loss_step=status['updates']):
+                        self.assertTrue(records['metrics'], 'Live loss chart must not wait for a checkpoint')
+                        self.assertEqual(records['metrics'][-1]['step'], status['updates'])
+                        self.assertEqual(records['metrics'][-1]['loss'], status['loss_metrics']['loss'])
+                        self.assertEqual(len({row['step'] for row in records['metrics']}), len(records['metrics']))
 
     def test_slow_update_skips_timed_save_and_stop_keeps_pending_updates(self):
         with tempfile.TemporaryDirectory() as name:
@@ -825,6 +881,34 @@ class EngineTests(unittest.TestCase):
                     self.assertEqual(status['rule_config'], Rules(3, 3, 3).to_dict())
                     self.assertEqual((status['game']['size'], len(status['game']['board'])), (3, 9))
                     self.assertEqual(Path(status['data_directory']), root.resolve())
+                    origin = f'http://127.0.0.1:{port}'
+                    with urllib.request.urlopen(origin, timeout=5) as response:
+                        token = response.read().decode().split('name="engine-token" content="')[1].split('"')[0]
+                    def post(path, body):
+                        request = urllib.request.Request(origin + path, json.dumps(body).encode(), headers={
+                            'Content-Type': 'application/json', 'X-Engine-Token': token, 'Origin': origin})
+                        with urllib.request.urlopen(request, timeout=5) as response:
+                            return json.load(response)['game']
+                    post('/api/move', {'cell': 0})
+                    with patch.object(web.subprocess, 'run') as bot:
+                        for bot_move in (3, 4):
+                            bot.return_value = SimpleNamespace(returncode=0, stdout=json.dumps({
+                                'moves': [bot_move], 'strategy': {'cached': bot_move}}))
+                            if bot_move == 4:
+                                post('/api/move', {'cell': 1})
+                            post('/api/bot', {'simulations': 4, 'model': 'best'})
+                        won = post('/api/move', {'cell': 2})
+                        self.assertTrue(won['done'])
+                        restored = post('/api/undo', {})
+                        self.assertEqual(restored['moves'], [0, 3, 1, 4])
+                        self.assertFalse(restored['done'])
+                        self.assertEqual(post('/api/undo', {})['moves'], [0, 3])
+                        post('/api/move', {'cell': 1})
+                        post('/api/bot', {'simulations': 4, 'model': 'best'})
+                        self.assertEqual(json.loads(bot.call_args.kwargs['input'])['strategy'], {'cached': 3})
+                        self.assertIn('--simulations', bot.call_args.args[0])
+                        self.assertEqual(post('/api/undo', {})['moves'], [0, 3])
+                        self.assertFalse(post('/api/undo', {})['can_undo'])
                     # The real CLI must reject another dashboard instead of silently sharing the URL.
                     with self.assertRaises(SystemExit) as failure:
                         main(['web', '--data', str(other), '--port', str(port)])

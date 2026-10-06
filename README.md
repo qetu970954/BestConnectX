@@ -61,7 +61,7 @@ If resume reports that an unfinished tournament's code changed, see [`--restart-
 4. By default, every **10,000 completed games**, the trainer saves a frozen playing model. Existing runs keep their saved interval. The filename counts games, not learning updates.
 5. The first milestone becomes the initial best. Each new tournament uses the **newest frozen milestone** against the accepted best, skipping older waiting candidates. An active comparison finishes with its original models; all milestone files are kept.
 
-A tournament uses **100 games**, with 50 shared openings and swapped colors. A candidate needs **at least 55 points**, verified game histories, and at most **0.1 seconds** of full-turn overtime. A win earns 1 point and a draw 0.5. Default thinking time is **0.25 seconds per full turn**, including both Connect6 placements, with the same simulation cap for both bots (default 64).
+A tournament uses **100 games**, with 50 shared openings and swapped colors. A candidate needs **at least 55 points**, verified game histories, and at most **0.1 seconds** of full-turn overtime. A win earns 1 point and a draw 0.5. Default thinking time is **0.25 seconds per full turn**, including both Connect6 placements, with the same simulation cap for both bots (new-run default 400).
 
 This is a practical regression filter, **not proof of stronger play**. Losing the tournament does not reset the learner. Self-play keeps using its newest weights; only the accepted best stays unchanged.
 
@@ -83,15 +83,15 @@ Tied MCTS visit counts use the model's prior; exact prior ties and equivalent ta
 | `selfplay-stats.json`, `metrics/` | Recent game summaries and loss history |
 | `gate-model-*.json`, `gate-archive/` | Resumable tournament histories and archived comparisons |
 
-`latest.pt` saves **once per model milestone** (new-run default: every 10,000 completed games) and on a safe stop. Starting or resuming does not rewrite it, and there are no timed saves between milestones. Live progress still updates; game summaries and loss history are published with the checkpoint. A power failure or forced kill loses work since the last complete save.
+`latest.pt` saves **once per model milestone** (new-run default: every 10,000 completed games) and on a safe stop. Starting or resuming does not rewrite it, and there are no timed saves between milestones. Live progress, recent-game summaries, and sampled loss history update during training (about every three seconds), including before the first checkpoint. Complete loss history is published with the checkpoint. A power failure or forced kill loses work since the last complete save.
 
 Saves use atomic replacement. The default disk cap is **20 GiB**: if it fills, training stops rather than silently deleting old models. Finished self-play move histories are not archived; recent samples and unfinished games stay in the checkpoint. Tournament histories are retained for verification. If a `best.pt` export is interrupted, resume repairs it from `incumbent.json`.
 
 ## Play, tune, and check
 
-Pause training before asking the dashboard bot to move. Choose best, latest, or a numbered milestone, and **0.5, 1, 2, 4, 8, or 16 seconds** of thinking time per full turn. Connect6 bot moves complete the whole turn. Arrow keys move focus; Enter/Space places a stone. Close the dashboard with Ctrl+C, or use `--port 8766` for another dashboard. Requests stay local and use a same-origin token.
+Pause training before asking the dashboard bot to move. Choose best, latest, or a numbered milestone, and an **MCTS simulation limit per placement** (32–4,096; default 64). Tactical moves and heuristic opponents can finish without using that limit; model startup also takes time. **Undo / 悔棋** takes back your latest placement and any AI reply that followed it, including an unfinished Connect6 turn. Connect6 bot moves complete the whole turn. Arrow keys move focus; Enter/Space places a stone. Close the dashboard with Ctrl+C, or use `--port 8766` for another dashboard. Requests stay local and use a same-origin token.
 
-The starting settings are **6 CPU workers, 64 concurrent games, 64 simulations per placement, and learning batch 128**. These are different controls—not interchangeable batch sizes. More workers or a busier GPU does not automatically mean a stronger bot. The default learning rate is fixed at **0.001**; there is no automatic schedule.
+The starting settings are **6 CPU workers, 64 concurrent games, 400 simulations per placement, a 10 ms self-play tactical budget per position, and learning batch 128**. These are different controls—not interchangeable batch sizes. More workers or a busier GPU does not automatically mean a stronger bot. The default learning rate is fixed at **0.001**; there is no automatic schedule.
 
 Use [`configs/experiments.toml`](configs/experiments.toml) or explicit flags for new runs. The optional `pooled` and `attention` models need separate directories. Boards must be square, with edge 2–25. Gomoku has no forbidden moves or swap opening; overlines win.
 

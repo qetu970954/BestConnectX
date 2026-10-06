@@ -94,7 +94,7 @@ footer{display:flex;justify-content:space-between;gap:20px;color:var(--muted);fo
   .dashboard .board-space{min-height:0;container-type:size;display:grid;place-items:center}
   .dashboard .board-frame{width:min(100cqw,100cqh);aspect-ratio:1;padding:14px}
   .dashboard .board-footer{margin:0}
-  .dashboard .play-controls{display:grid;grid-template-columns:70px minmax(120px,1fr) 76px auto auto;gap:8px;margin:0}
+  .dashboard .play-controls{display:grid;grid-template-columns:70px minmax(120px,1fr) 76px auto auto auto;gap:8px;margin:0}
   .dashboard label{gap:5px}
   .dashboard select,.dashboard input{padding:8px}
   .dashboard button.primary,.dashboard button.secondary{padding:9px 12px}

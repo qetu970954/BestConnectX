@@ -183,6 +183,31 @@ class RuntimeTests(unittest.TestCase):
             tactical_ms=0, workers=1, _mode=1, _duration=5)[0]['action'] for seed in range(32)]
         self.assertGreater(len(set(selected)), 4)
 
+    def test_full_turn_uses_simulations_without_the_turn_time_limit(self):
+        # Compare the full-turn entry point with the existing per-placement search.
+        for rules, opening in ((Rules(3, 3, 3), []), (Rules(15, 15, 5), [112]),
+                               (Rules(19, 19, 6, 2, 1), [180])):
+            game = Game.from_moves(opening, rules=rules)
+            net = Network(4, 1, rules.height).eval()
+            expected, child, color = [], game.copy(), game.player
+            plans, strategies = [[]], [None]
+            while not child.done and child.player == color:
+                decision = selfplay_batch([child], net, 4, None, workers=1, _mode=1,
+                    _duration=604800, tactical_ms=50, tss_enabled=True, plans=plans, strategies=strategies)[0]
+                child.play(decision['action']); expected.append(decision['action'])
+                plans[0] = plans[0][1:]
+            for seconds in (0., .02, 30.):
+                actual, _, elapsed = full_turn(game, net, seconds, simulations=4)
+                self.assertEqual(actual, expected)
+                self.assertGreater(elapsed, 0.)
+                self.assertEqual(game.moves, opening)
+        winning = Game(rules=Rules(19, 19, 6, 2, 1))
+        winning.board[:5] = 1; winning.left = 2
+        self.assertEqual(full_turn(winning, None, 0., simulations=4)[0], [5])
+        for invalid in (True, 0, -1, 100001, 1.5, '4'):
+            with self.assertRaises(ValueError):
+                full_turn(winning, None, 0., simulations=invalid)
+
     def test_four_turn_tss_is_verified_and_obeys_limits(self):
         fixture = json.loads((Path(__file__).parent/'fixtures/tss-fourturn.json').read_text())
         rules = Rules(19, 19, 6, 2, 1)

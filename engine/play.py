@@ -33,6 +33,7 @@ def play(args):
                 raise ValueError("Choose best, latest, heuristic, or a saved model filename.")
             entry = {"kind": "candidate", "file": f"models/{args.model}", "id": args.model[:-3]}
         net = network(root, entry, device_for(args.device), rules) if entry.get("file") else None
-        moves, strategy, duration = full_turn(game, net, args.seconds, payload.get('strategy'))
+        moves, strategy, duration = full_turn(game, net, args.seconds, payload.get('strategy'),
+                                            simulations=args.simulations)
         print(json.dumps({'moves': moves, 'model': entry.get('id', 'heuristic'),
                           'kind': entry['kind'], 'seconds': duration, 'strategy': strategy}))

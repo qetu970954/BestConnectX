@@ -35,7 +35,7 @@ uv run python train.py --data data/connect6-15x15 --device cuda --hours 2
 
 Ctrl+C also requests a safe stop. **Wait for Saved before closing the terminal.** The two-hour limit applies to the training loop; startup and final saving add time. An existing checkpoint in that directory is resumed, not replaced with a fresh model. For another experiment, change `--data`.
 
-The dashboard opens at **http://127.0.0.1:8765**. Choose English or 繁體中文; the browser remembers your choice. Its thinking-time menu offers **0.5, 1, 2, 4, 8, and 16 seconds per full turn**. Pause training before bot play. Arrow keys move focus; Enter/Space places a stone. Use `--port 8766` for a second dashboard. No CUDA? Replace `--device cuda` with `--device cpu`; small CPU checks can also use `--workers 1`.
+The dashboard opens at **http://127.0.0.1:8765**. Choose English or 繁體中文; the browser remembers your choice. Its MCTS menu offers **32–4,096 simulations per placement** (default 64). Tactical moves and heuristic opponents can finish sooner; startup adds to the wait. **Undo / 悔棋** takes back your latest placement and its following AI reply, including partial Connect6 turns. Pause training before bot play. Arrow keys move focus; Enter/Space places a stone. Use `--port 8766` for a second dashboard. No CUDA? Replace `--device cuda` with `--device cpu`; small CPU checks can also use `--workers 1`.
 
 For the larger Connect6 setup with the same **256-sample learning batch**:
 
@@ -88,7 +88,8 @@ The starting values were checked on a Windows desktop with a multicore CPU and a
 | `--parallel 64` | Concurrent self-play games; can change on resume |
 | `--batch 128` | Samples per learning update; restored from checkpoint on resume |
 | `--learning-rate 0.001` | Fixed AdamW rate for a new run; restored on resume |
-| `--simulations 64` | Search simulations per placement; restored on resume |
+| `--simulations 400` | Search simulations per placement; restored on resume |
+| `--tactical-ms 10` | Self-play tactical budget per position; restored on resume |
 | `--channels 64 --blocks 6` | Model width and residual depth; a change needs a new run |
 | `--architecture attention` | Experimental model design; default `residual` |
 | `--replay-limit 400000` | Stored symmetry views; default 400,000 = 50,000 original positions; restored on resume |
@@ -126,7 +127,7 @@ This prints summary JSON. It does not update weights, save game records, or prov
 - **`best.pt`: play with the accepted model.** `incumbent.json` decides which milestone it mirrors. Resume repairs interrupted exports. The first milestone is an unvalidated baseline.
 - **Later promotions: at least 55 points in 100 games.** Fifty paired openings, swapped colors, checked histories, and maximum full-turn overtime of 0.1 seconds. A win earns 1 and a draw 0.5. This is a provisional filter, not proof of strength.
 - **Finish evaluation, then keep learning.** After each milestone after the initial baseline, the full 100-game tournament runs with self-play and optimization paused. A rejected candidate does not reset the learner. An interrupted tournament finishes before learning resumes.
-- **Keep files; stop at the cap.** No automatic deletion of old milestones. `selfplay-stats.json` keeps the latest 1,000 summaries, not move histories. Recent replay lives in the checkpoint. Tournament histories remain for verification.
+- **Keep files; stop at the cap.** No automatic deletion of old milestones. `selfplay-stats.json` keeps the latest 1,000 summaries, not move histories. The dashboard reads live summaries and sampled loss points from `status.json` about every three seconds, before checkpoints; complete loss history is exported at checkpoints. Recent replay lives in the checkpoint. Tournament histories remain for verification.
 
 ## Run the checks
 

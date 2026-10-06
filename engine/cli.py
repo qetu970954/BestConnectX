@@ -62,11 +62,11 @@ def main(argv=None):
     add_rules(training)
     common(training)
     training.add_argument("--seed", type=int, default=5070)
-    training.add_argument("--simulations", type=int, default=64)
+    training.add_argument("--simulations", type=int, default=400)
     training.add_argument("--parallel", type=int, default=None,
                           help="Concurrent self-play games (new-run default: 64); explicit values also apply on resume")
     training.add_argument("--batch", type=int, default=128)
-    training.add_argument("--tactical-ms", type=float, default=2)
+    training.add_argument("--tactical-ms", type=float, default=10)
     training.add_argument("--snapshot-every", type=int, default=10000, help="Self-play games between immutable model snapshots (new-run default: 10000; restored on resume)")
     training.add_argument("--seconds", type=float, default=None,
                           help="Equal gate full-turn limit (new-run default: 0.25s); frozen in each gate")
@@ -88,10 +88,10 @@ def main(argv=None):
     generation.add_argument('--games', type=int, default=1)
     generation.add_argument('--model', default='heuristic', choices=('heuristic', 'latest', 'best'))
     generation.add_argument('--device', choices=('auto', 'cpu', 'cuda'), default='auto')
-    generation.add_argument('--simulations', type=int, default=64)
+    generation.add_argument('--simulations', type=int, default=400)
     generation.add_argument('--workers', type=int, default=6)
     generation.add_argument('--parallel', type=int, default=64, help='Concurrent native self-play games')
-    generation.add_argument('--tactical-ms', type=float, default=2)
+    generation.add_argument('--tactical-ms', type=float, default=10)
     generation.add_argument('--seed', type=int, default=5070)
     evaluation = commands.add_parser("evaluate", help="Resume an existing frozen 100-game gate")
     common(evaluation)
@@ -100,7 +100,9 @@ def main(argv=None):
     play = commands.add_parser("play", help="JSON stdin/stdout bot-turn interface")
     play.add_argument("--data", default=str(Path("data") / DEFAULT_RULES.id))
     play.add_argument("--model", default="best", help="best, latest, heuristic, or model-NNNNNNNN.pt")
-    play.add_argument("--seconds", type=float, default=5)
+    budget = play.add_mutually_exclusive_group()
+    budget.add_argument("--seconds", type=float, default=5, help="Time limit per full turn (default 5 seconds)")
+    budget.add_argument("--simulations", type=int, help="MCTS simulation limit per placement, without a search time limit")
     play.add_argument("--device", choices=("auto", "cpu", "cuda"), default="auto")
     web = commands.add_parser("web", help="Local play/results dashboard; no browser training controls",
                               prog=parser.prog if Path(sys.argv[0]).name == "dashboard.py" else f"{parser.prog} web")
@@ -153,6 +155,8 @@ def main(argv=None):
             from .training import evaluate
             evaluate(args)
         elif args.command == "play":
+            if args.simulations is not None and not 1 <= args.simulations <= 100000:
+                raise ValueError("MCTS simulations must be 1..100000.")
             if not math.isfinite(args.seconds) or not .02 <= args.seconds <= 30:
                 raise ValueError("Thinking time must be 0.02..30 seconds.")
             from .play import play

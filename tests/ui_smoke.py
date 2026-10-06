@@ -62,6 +62,8 @@ def check(data, flags, connect6, browser):
         size = status['rule_config']['height']
         expect(page.locator('.cell')).to_have_count(size * size)
         expect(page.locator('#turn')).to_contain_text('你的回合')
+        expect(page.locator('#undo-move')).to_have_text('悔棋')
+        expect(page.locator('[data-i18n="thinkingSimulations"]')).to_have_text('MCTS／子')
         stats = page.request.get(url + '/api/history').json()['selfplay']
         expect(page.locator('#selfplay-window')).to_have_text(f"{stats['games']:,} / 1,000")
         for selector, key, scale in (
@@ -77,6 +79,28 @@ def check(data, flags, connect6, browser):
             expect(page.locator('#black-wins')).to_contain_text(f"{stats['black_wins']:,} 盤")
             expect(page.locator('#white-wins')).to_contain_text(f"{stats['white_wins']:,} 盤")
             expect(page.locator('#selfplay-draws')).to_contain_text(f"{stats['draws']:,} 盤")
+        if connect6:
+            # Live summaries and the very first loss point must not need a checkpoint.
+            original_status = (data / 'status.json').read_bytes() if (data / 'status.json').exists() else None
+            live = {'games': 10001, 'updates': 1, 'selfplay_summaries': [
+                {'game': 10001, 'winner': 1, 'placements': 12, 'turns': 7, 'source_counts': {}}],
+                'loss_history': [{'step': 1, 'games': 10001, 'loss': 3., 'policy_loss': 2., 'value_loss': 1.}]}
+            save_json(data / 'status.json', live)
+            page.evaluate('refresh()')
+            expect(page.locator('#selfplay-range')).to_contain_text('10,001–10,001')
+            expect(page.locator('#loss-chart polyline')).to_have_count(3)
+            live['games'], live['updates'] = 10002, 2
+            live['selfplay_summaries'].append({'game': 10002, 'winner': -1, 'placements': 14, 'turns': 8, 'source_counts': {}})
+            live['loss_history'].append({'step': 2, 'games': 10002, 'loss': 2., 'policy_loss': 1.5, 'value_loss': .5})
+            save_json(data / 'status.json', live)
+            expect(page.locator('#selfplay-range')).to_contain_text('10,001–10,002')
+            expect(page.locator('#loss-chart')).to_contain_text('2')
+            expect(page.locator('#loss-value')).to_contain_text('2.0000')
+            if original_status is None:
+                (data / 'status.json').unlink()
+            else:
+                (data / 'status.json').write_bytes(original_status)
+            page.evaluate('refresh()')
         if not connect6:
             assert stats['games'] == 16  # The separate 100-game evaluation must stay out.
         assert page.locator('#train').count() == 0
@@ -94,13 +118,14 @@ def check(data, flags, connect6, browser):
             board = page.locator('#board').bounding_box()
             assert abs(board['width'] - board['height']) < 1
         page.set_viewport_size({'width': 1920, 'height': 1080})
-        assert page.locator('#seconds option').evaluate_all('(options) => options.map(option => option.value)') == ['0.5', '1', '2', '4', '8', '16']
-        page.locator('#seconds').select_option('4')
+        assert page.locator('#simulations option').evaluate_all('(options) => options.map(option => option.value)') == ['32', '64', '128', '256', '512', '1024', '2048', '4096']
+        page.locator('#simulations').select_option('256')
         page.locator('#language').select_option('en')
         expect(page.locator('html')).to_have_attribute('lang', 'en')
         expect(page.locator('#turn')).to_contain_text('Your turn')
         expect(page.locator('#bot-move')).to_have_text('AI move')
-        expect(page.locator('#seconds')).to_have_value('4')
+        expect(page.locator('#undo-move')).to_have_text('Undo')
+        expect(page.locator('#simulations')).to_have_value('256')
         assert page.evaluate("!/[\\u3400-\\u9fff]/u.test(document.body.innerText.replace('繁體中文', ''))")
         page.reload()
         expect(page.locator('#language')).to_have_value('en')
@@ -111,6 +136,7 @@ def check(data, flags, connect6, browser):
         expect(page.locator('#bot-move')).to_have_text('AI 落子')
         baseline = layout(page)
         assert page.evaluate("action('/api/move', {cell:-1})") is False
+        expect(page.locator('#undo-move')).to_be_disabled()
         expect(page.locator('#notice')).to_be_visible()
         expect(page.locator('#notice')).to_have_class('error')
         assert_layout(baseline, layout(page))
@@ -120,7 +146,7 @@ def check(data, flags, connect6, browser):
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.evaluate("notice('')")
         assert_layout(baseline, layout(page))
-        page.locator('#seconds').select_option('0.5')
+        page.locator('#simulations').select_option('32')
         page.locator('.selfplay-card .stats-details summary').focus()
         page.keyboard.press('Enter')
         expect(page.locator('.selfplay-card .stats-details')).to_have_attribute('open', '')
@@ -131,6 +157,47 @@ def check(data, flags, connect6, browser):
         assert page.evaluate('document.documentElement.scrollHeight <= innerHeight')
         page.keyboard.press('Enter')
         expect(page.locator('.selfplay-card .stats-details')).not_to_have_attribute('open', '')
+        with run_lock(data):
+            page.evaluate('refresh()')
+            elapsed = page.evaluate("""async () => {
+                while (polling) await new Promise(resolve => setTimeout(resolve, 10));
+                const original = window.fetch;
+                window.fetch = async (...args) => {
+                    if (args[0] === '/api/history') await new Promise(resolve => setTimeout(resolve, 1500));
+                    return original(...args);
+                };
+                const started = performance.now();
+                try { await action('/api/move', {cell: 0}); return performance.now() - started; }
+                finally { window.fetch = original; }
+            }""")
+            expect(page.locator('.black')).to_have_count(1)
+            assert elapsed < 800, f'Stone feedback waited for chart history: {elapsed:.0f}ms'
+            print(f'Stone feedback: {elapsed:.0f}ms with history artificially delayed 1500ms')
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(0)
+            # A status request started before a placement must not erase that placement.
+            assert page.evaluate("""async () => {
+                while (polling) await new Promise(resolve => setTimeout(resolve, 10));
+                const original = window.fetch;
+                let release, ready;
+                const delayed = new Promise(resolve => { release = resolve; });
+                const captured = new Promise(resolve => { ready = resolve; });
+                window.fetch = async (...args) => {
+                    const response = await original(...args);
+                    if (args[0] !== '/api/status') return response;
+                    const old = await response.json(); ready(); await delayed;
+                    return new Response(JSON.stringify(old));
+                };
+                try {
+                    const poll = refresh(); await captured;
+                    await action('/api/move', {cell: 0}); release(); await poll;
+                    return state.game.moves.length === 1 && state.game.can_undo;
+                } finally { release(); window.fetch = original; }
+            }""")
+            expect(page.locator('.black')).to_have_count(1)
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(0)
+        page.evaluate('async () => { while (polling) await new Promise(resolve => setTimeout(resolve, 10)); await refresh(); }')
         center = size * size // 2
         baseline = layout(page)
         thinking_layout = []
@@ -151,8 +218,19 @@ def check(data, flags, connect6, browser):
             page.locator('.cell').nth(0).click()
             expect(page.locator('.black, .white')).to_have_count(4)
             expect(page.locator('#placements')).to_contain_text('剩 1 子')
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(3)
+            expect(page.locator('#placements')).to_contain_text('剩 2 子')
+            page.locator('.cell').nth(0).click()
+            expect(page.locator('.black, .white')).to_have_count(4)
             page.locator('.cell').nth(1).click()
             expect(page.locator('.black, .white')).to_have_count(7, timeout=60000)
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(4)
+            expect(page.locator('#placements')).to_contain_text('剩 1 子')
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(3)
+            expect(page.locator('#placements')).to_contain_text('剩 2 子')
         else:
             expect(page.locator('#loss-chart polyline')).to_have_count(3)
             expect(page.locator('#gate-chart polyline')).to_have_count(2)
@@ -161,6 +239,9 @@ def check(data, flags, connect6, browser):
             threshold = page.locator('#gate-chart line[stroke-dasharray]').get_attribute('y1')
             assert abs(float(threshold) - 98.7) < .000001  # 55% on the 0..1 score axis.
             expect(page.locator('#gate-results')).to_contain_text('100/100')
+            page.locator('#undo-move').click()
+            expect(page.locator('.black, .white')).to_have_count(0)
+            expect(page.locator('#undo-move')).to_be_disabled()
             best = page.evaluate("fetch('/api/status').then(r=>r.json()).then(s=>s.incumbent.file)")
             page.locator('#model').select_option('latest')
             page.locator('#new-game').click()
@@ -200,17 +281,32 @@ def check(data, flags, connect6, browser):
         # The data-directory lock blocks competing play while CLI work owns it.
         page.locator('#new-game').click()
         expect(page.locator('.black, .white')).to_have_count(0)
+        expect(page.locator('#undo-move')).to_be_disabled()
+        assert page.evaluate("action('/api/undo', {})") is False
+        assert page.evaluate("action('/api/new', {human: -1})") is True
+        for invalid in (True, 0, -1, 4097, 1.5, '32', None):
+            assert page.evaluate("value => action('/api/bot', {simulations: value})", invalid) is False
+        assert page.evaluate('state.game.moves.length') == 0
+        assert page.evaluate("action('/api/new', {human: 1})") is True
         with run_lock(data):
             assert page.evaluate("""fetch('/api/move',{method:'POST',headers:{'Content-Type':'application/json',
                 'X-Engine-Token':document.querySelector('meta[name="engine-token"]').content},body:JSON.stringify({cell:0})}).then(r=>r.status)""") == 200
             assert page.evaluate("""fetch('/api/bot',{method:'POST',headers:{'Content-Type':'application/json',
-                'X-Engine-Token':document.querySelector('meta[name="engine-token"]').content},body:'{"seconds":0.02}'}).then(r=>r.status)""") == 400
+                'X-Engine-Token':document.querySelector('meta[name="engine-token"]').content},body:'{"simulations":32}'}).then(r=>r.status)""") == 400
         assert not errors, errors
         page.close()
     finally:
         server.terminate()
         server.wait(timeout=15)
 
+
+if '--live-only' in sys.argv:
+    with tempfile.TemporaryDirectory() as name, sync_playwright() as playwright:
+        browser = playwright.chromium.launch(executable_path=chrome, headless=True, args=['--disable-gpu'])
+        check(Path(name), ['--preset', 'connect6'], True, browser)
+        browser.close()
+    print('Live dashboard and responsive placement checks passed.')
+    raise SystemExit(0)
 
 with tempfile.TemporaryDirectory() as name:
     root = Path(name)
